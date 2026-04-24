@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,18 @@ def _render_section(tag: str, content: Optional[str]) -> str:
         return ""
     title = tag.replace("_", " ").title()
     return f"{title}:\n{content}"
+
+
+def _configure_stdio() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
 
 
 def build_handoff(args: argparse.Namespace) -> str:
@@ -77,6 +90,7 @@ def build_handoff(args: argparse.Namespace) -> str:
 
 
 def main() -> None:
+    _configure_stdio()
     parser = argparse.ArgumentParser(description="Structured Claude delegation wrapper")
     parser.add_argument("--PROMPT", required=True, help="Task instruction for Claude.")
     parser.add_argument("--cd", required=True, help="Workspace root for Claude.")
@@ -138,12 +152,17 @@ def main() -> None:
     for add_dir in args.add_dir:
         command.extend(["--add-dir", add_dir])
 
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
+
     completed = subprocess.run(
         command,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
         check=False,
     )
 

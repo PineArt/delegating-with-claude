@@ -14,6 +14,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+def _configure_stdio() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+
 def _get_windows_npm_paths() -> List[Path]:
     if os.name != "nt":
         return []
@@ -129,6 +141,7 @@ def _build_command(args: argparse.Namespace) -> List[str]:
 
 
 def main() -> None:
+    _configure_stdio()
     parser = argparse.ArgumentParser(description="Claude Bridge")
     parser.add_argument("--PROMPT", required=True, help="Instruction for the task to send to Claude.")
     parser.add_argument("--cd", required=True, help="Workspace root for the Claude session.")
@@ -168,6 +181,8 @@ def main() -> None:
     args = parser.parse_args()
 
     env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
     _augment_path_env(env)
 
     command = _build_command(args)
