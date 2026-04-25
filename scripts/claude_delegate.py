@@ -33,6 +33,15 @@ def _render_section(tag: str, content: Optional[str]) -> str:
     return f"{title}:\n{content}"
 
 
+def _inline_context(sections: Iterable[str]) -> str:
+    normalized: List[str] = []
+    for section in sections:
+        compact = " ".join(section.split())
+        if compact:
+            normalized.append(compact)
+    return "; ".join(normalized)
+
+
 def _configure_stdio() -> None:
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
@@ -73,19 +82,17 @@ def build_handoff(args: argparse.Namespace) -> str:
 
     parts: List[str] = []
     if sections:
+        context = _inline_context(sections)
         parts.extend(
             [
-                "Complete the task below. Use the advisory context afterwards if it is helpful. Do not comment on the context packaging itself.",
-                "",
-                "Task:",
-                args.PROMPT.strip(),
-                "",
-                "Working context:",
-                *sections,
+                (
+                    f"Please complete this task directly: {args.PROMPT.strip()} "
+                    f"Use these handoff notes as the source for your answer: {context}"
+                ),
             ]
         )
     else:
-        parts.extend(["Task:", args.PROMPT.strip()])
+        parts.append(args.PROMPT.strip())
     return "\n".join(parts).strip() + "\n"
 
 
