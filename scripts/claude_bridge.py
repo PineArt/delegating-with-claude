@@ -140,8 +140,7 @@ def _build_command(args: argparse.Namespace) -> List[str]:
     return command
 
 
-def main() -> None:
-    _configure_stdio()
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Claude Bridge")
     parser.add_argument("--PROMPT", required=True, help="Instruction for the task to send to Claude.")
     parser.add_argument("--cd", required=True, help="Workspace root for the Claude session.")
@@ -178,8 +177,10 @@ def main() -> None:
         action="store_true",
         help="Include Claude's raw JSON result payload in the output.",
     )
-    args = parser.parse_args()
+    return parser
 
+
+def run_claude(args: argparse.Namespace) -> Dict[str, Any]:
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
@@ -201,11 +202,9 @@ def main() -> None:
             check=False,
         )
     except FileNotFoundError as error:
-        print(json.dumps({"success": False, "error": f"Claude executable not found: {error}"}, ensure_ascii=False, indent=2))
-        return
+        return {"success": False, "error": f"Claude executable not found: {error}"}
     except OSError as error:
-        print(json.dumps({"success": False, "error": f"Failed to launch Claude: {error}"}, ensure_ascii=False, indent=2))
-        return
+        return {"success": False, "error": f"Failed to launch Claude: {error}"}
 
     parsed = _extract_result_json(completed.stdout)
     stderr = completed.stderr.strip()
@@ -221,8 +220,7 @@ def main() -> None:
         }
         if args.return_raw_result:
             result["raw_result"] = parsed
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
+        return result
 
     error_parts: List[str] = []
     if parsed:
@@ -243,6 +241,14 @@ def main() -> None:
         result["SESSION_ID"] = parsed.get("session_id")
     if args.return_raw_result and parsed:
         result["raw_result"] = parsed
+    return result
+
+
+def main() -> None:
+    _configure_stdio()
+    parser = _build_parser()
+    args = parser.parse_args()
+    result = run_claude(args)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

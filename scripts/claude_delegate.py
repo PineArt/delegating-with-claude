@@ -6,11 +6,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable, List, Optional
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from claude_bridge import run_claude
 
 
 def _normalize_items(values: Iterable[str]) -> List[str]:
@@ -96,6 +102,21 @@ def build_handoff(args: argparse.Namespace) -> str:
     return "\n".join(parts).strip() + "\n"
 
 
+def call_bridge(args: argparse.Namespace, prompt_to_send: str) -> dict:
+    bridge_args = SimpleNamespace(
+        PROMPT=prompt_to_send,
+        cd=args.cd,
+        SESSION_ID=args.SESSION_ID,
+        permission_mode=args.permission_mode,
+        add_dir=args.add_dir,
+        model=args.model,
+        system_prompt="",
+        append_system_prompt="",
+        return_raw_result=args.return_raw_result,
+    )
+    return run_claude(bridge_args)
+
+
 def main() -> None:
     _configure_stdio()
     parser = argparse.ArgumentParser(description="Structured Claude delegation wrapper")
@@ -138,55 +159,7 @@ def main() -> None:
     if not args.SESSION_ID or args.context_on_resume:
         prompt_to_send = handoff.rstrip()
 
-    bridge_script = Path(__file__).with_name("claude_bridge.py")
-    command = [
-        sys.executable,
-        str(bridge_script),
-        "--cd",
-        args.cd,
-        "--PROMPT",
-        prompt_to_send,
-        "--permission-mode",
-        args.permission_mode,
-    ]
-
-    if args.SESSION_ID:
-        command.extend(["--SESSION_ID", args.SESSION_ID])
-    if args.model:
-        command.extend(["--model", args.model])
-    if args.return_raw_result:
-        command.append("--return-raw-result")
-    for add_dir in args.add_dir:
-        command.extend(["--add-dir", add_dir])
-
-    env = os.environ.copy()
-    env.setdefault("PYTHONIOENCODING", "utf-8")
-    env.setdefault("PYTHONUTF8", "1")
-
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        check=False,
-    )
-
-    stdout = completed.stdout.strip()
-    stderr = completed.stderr.strip()
-
-    if completed.returncode != 0:
-        error = stderr or stdout or f"claude_bridge.py failed with exit code {completed.returncode}."
-        print(json.dumps({"success": False, "error": error}, ensure_ascii=False, indent=2))
-        return
-
-    try:
-        result = json.loads(stdout)
-    except json.JSONDecodeError:
-        message = stdout or stderr or "claude_bridge.py returned non-JSON output."
-        print(json.dumps({"success": False, "error": message}, ensure_ascii=False, indent=2))
-        return
+    result = call_bridge(args, prompt_to_send)
 
     if args.save_handoff:
         result["handoff_path"] = str(Path(args.save_handoff))
