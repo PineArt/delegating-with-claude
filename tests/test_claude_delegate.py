@@ -36,6 +36,7 @@ def make_args(**overrides):
         "context_constraint": [],
         "context_repo_fact": [],
         "context_open_question": [],
+        "context_review_item": [],
         "context_next_step": "",
     }
     values.update(overrides)
@@ -96,6 +97,51 @@ def test_build_handoff_uses_direct_inline_shape():
     assert "\nTask:" not in handoff
     assert "\nWorking context:" not in handoff
     assert handoff.endswith("\n")
+
+
+def test_build_handoff_preserves_explicit_review_items():
+    delegate = load_delegate()
+    handoff = delegate.build_handoff(
+        make_args(
+            PROMPT="Review the planned changes only.",
+            context_summary="Three implementation choices need targeted critique.",
+            context_review_item=[
+                "Option A: preserve current refresh flow and add chart toggle.",
+                "Option B: move records into the partial before adding the toggle.",
+                "Option C: split the views and chart bootstrap logic.",
+            ],
+            context_constraint=["Do not do broad code review."],
+            context_next_step="Assess each option individually.",
+        )
+    )
+
+    assert "1. Option A: preserve current refresh flow and add chart toggle." in handoff
+    assert "2. Option B: move records into the partial before adding the toggle." in handoff
+    assert "3. Option C: split the views and chart bootstrap logic." in handoff
+    assert "Review only the numbered items below." in handoff
+    assert "Reply with one section per numbered item." in handoff
+    assert "Use these handoff notes as the source for your answer:" not in handoff
+
+
+def test_numbered_prompt_without_review_items_uses_inline_shape():
+    delegate = load_delegate()
+    handoff = delegate.build_handoff(
+        make_args(
+            PROMPT=(
+                "Review these changes only:\n"
+                "1. Fix shell F5 restore.\n"
+                "2. Add a third billing chart.\n"
+                "3. Merge today's usage into the quota panel."
+            ),
+            context_summary="Three approved fixes need item-by-item review.",
+            context_constraint=["Do not inspect unrelated plans."],
+        )
+    )
+
+    assert handoff.startswith("Please complete this task directly: Review these changes only:")
+    assert "Review only the numbered items below." not in handoff
+    assert "Reply with one section per numbered item." not in handoff
+    assert "Use these handoff notes as the source for your answer:" in handoff
 
 
 def test_preview_handoff_saves_and_prints_utf8(monkeypatch, capsys):

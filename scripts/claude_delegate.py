@@ -32,6 +32,10 @@ def _render_list(items: Iterable[str]) -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
+def _render_numbered_list(items: Iterable[str]) -> str:
+    return "\n".join(f"{index}. {item}" for index, item in enumerate(items, start=1))
+
+
 def _render_section(tag: str, content: Optional[str]) -> str:
     if not content:
         return ""
@@ -63,12 +67,14 @@ def _configure_stdio() -> None:
 def build_handoff(args: argparse.Namespace) -> str:
     sections: List[str] = []
 
+    prompt = args.PROMPT.strip()
     summary = args.context_summary.strip() if args.context_summary else ""
     file_refs = _normalize_items(args.context_file_ref)
     findings = _normalize_items(args.context_finding)
     constraints = _normalize_items(args.context_constraint)
     repo_facts = _normalize_items(args.context_repo_fact)
     open_questions = _normalize_items(args.context_open_question)
+    review_items = _normalize_items(getattr(args, "context_review_item", []))
     next_step = args.context_next_step.strip() if args.context_next_step else ""
 
     if summary:
@@ -86,19 +92,43 @@ def build_handoff(args: argparse.Namespace) -> str:
     if next_step:
         sections.append(_render_section("next_step", next_step))
 
+    if review_items:
+        parts: List[str] = [
+            (
+                f"Please complete this task directly: {prompt} "
+                "Review only the numbered items below."
+            ),
+            "",
+            _render_numbered_list(review_items),
+        ]
+        if sections:
+            parts.extend(["", "Use these handoff notes as context:"])
+            parts.append("\n\n".join(sections))
+        parts.extend(
+            [
+                "",
+                (
+                    "Reply with one section per numbered item. For each item, state: "
+                    "assessment, risks, recommendation. Do not add items beyond the "
+                    "numbered items."
+                ),
+            ]
+        )
+        return "\n".join(parts).strip() + "\n"
+
     parts: List[str] = []
     if sections:
         context = _inline_context(sections)
         parts.extend(
             [
                 (
-                    f"Please complete this task directly: {args.PROMPT.strip()} "
+                    f"Please complete this task directly: {prompt} "
                     f"Use these handoff notes as the source for your answer: {context}"
                 ),
             ]
         )
     else:
-        parts.append(args.PROMPT.strip())
+        parts.append(prompt)
     return "\n".join(parts).strip() + "\n"
 
 
@@ -129,6 +159,7 @@ def main() -> None:
     parser.add_argument("--context-constraint", action="append", default=[], help="Constraint that must remain true.")
     parser.add_argument("--context-repo-fact", action="append", default=[], help="Stable project fact.")
     parser.add_argument("--context-open-question", action="append", default=[], help="Open question that materially affects implementation.")
+    parser.add_argument("--context-review-item", action="append", default=[], help="Explicit review item for option-by-option critique.")
     parser.add_argument("--context-next-step", default="", help="Single most useful next action for Claude.")
     parser.add_argument("--context-on-resume", action="store_true", help="Resend the structured handoff even when resuming an existing session.")
     parser.add_argument("--preview-handoff", action="store_true", help="Print the synthesized handoff and exit without calling Claude.")
