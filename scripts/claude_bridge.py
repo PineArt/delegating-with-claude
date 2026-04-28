@@ -136,7 +136,6 @@ def _build_command(args: argparse.Namespace) -> List[str]:
     if args.append_system_prompt:
         command.extend(["--append-system-prompt", args.append_system_prompt])
 
-    command.append(args.PROMPT)
     return command
 
 
@@ -195,6 +194,7 @@ def run_claude(args: argparse.Namespace) -> Dict[str, Any]:
             command,
             cwd=args.cd,
             capture_output=True,
+            input=args.PROMPT,
             text=True,
             encoding="utf-8",
             errors="replace",

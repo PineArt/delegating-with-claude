@@ -58,7 +58,6 @@ def test_build_command_includes_optional_arguments():
         "system text",
         "--append-system-prompt",
         "append text",
-        "Do the work.",
     ]
 
 
@@ -136,11 +135,11 @@ def test_run_claude_can_be_called_twice_without_prompt_state_leak(monkeypatch):
     seen_prompts = []
 
     def fake_subprocess_run(command, **kwargs):
-        seen_prompts.append(command[-1])
+        seen_prompts.append(kwargs.get("input"))
         return subprocess.CompletedProcess(
             command,
             0,
-            stdout=json.dumps({"session_id": f"session-{len(seen_prompts)}", "result": command[-1]}),
+            stdout=json.dumps({"session_id": f"session-{len(seen_prompts)}", "result": kwargs.get("input")}),
             stderr="",
         )
 
@@ -165,3 +164,41 @@ def test_run_claude_can_be_called_twice_without_prompt_state_leak(monkeypatch):
     assert first["agent_messages"] == "first prompt"
     assert second["agent_messages"] == "second prompt"
     assert seen_prompts == ["first prompt", "second prompt"]
+
+
+def test_run_claude_sends_multiline_prompt_via_stdin(monkeypatch):
+    bridge = load_bridge()
+    multiline_prompt = "Line one\n\n1. Alpha\n2. Beta\n\nFinal instruction."
+    captured = {}
+
+    def fake_subprocess_run(command, **kwargs):
+        captured["command"] = command
+        captured["input"] = kwargs.get("input")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({"session_id": "session-1", "result": "OK"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(bridge, "_resolve_executable", lambda name, env: name)
+    monkeypatch.setattr(bridge, "_rewrite_npm_wrapper", lambda command, env: command)
+
+    result = bridge.run_claude(
+        SimpleNamespace(
+            PROMPT=multiline_prompt,
+            cd=str(ROOT),
+            SESSION_ID="",
+            permission_mode="bypassPermissions",
+            add_dir=[],
+            model="",
+            system_prompt="",
+            append_system_prompt="",
+            return_raw_result=False,
+        )
+    )
+
+    assert result["success"] is True
+    assert captured["input"] == multiline_prompt
+    assert multiline_prompt not in captured["command"]
