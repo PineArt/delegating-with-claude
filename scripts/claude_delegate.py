@@ -1,6 +1,6 @@
 """
-Structured Claude delegation wrapper for the delegating-with-claude skill.
-Builds a compact handoff and forwards it through claude_bridge.py.
+Primary structured Claude delegation entrypoint for this skill.
+Builds a compact handoff and sends it through the internal Claude transport.
 """
 from __future__ import annotations
 
@@ -149,7 +149,7 @@ def call_bridge(args: argparse.Namespace, prompt_to_send: str) -> dict:
 
 def main() -> None:
     _configure_stdio()
-    parser = argparse.ArgumentParser(description="Structured Claude delegation wrapper")
+    parser = argparse.ArgumentParser(description="Primary structured Claude delegation entrypoint")
     parser.add_argument("--PROMPT", required=True, help="Task instruction for Claude.")
     parser.add_argument("--cd", required=True, help="Workspace root for Claude.")
     parser.add_argument("--SESSION_ID", default="", help="Resume the specified Claude session.")

@@ -82,7 +82,8 @@ The wrapper does not infer review items from numbered prose in `--PROMPT`; use `
 
 ## Recommended Command Pattern
 
-Use `scripts/claude_delegate.py`, not `claude_bridge.py`, unless low-level behavior is required.
+Use `scripts/claude_delegate.py` as the normal entrypoint.
+`scripts/claude_bridge.py` is an internal transport and diagnostic tool for isolating Claude CLI launch, stdin transport, or JSON response parsing. Do not call it for ordinary delegation.
 
 ```bash
 python scripts/claude_delegate.py \

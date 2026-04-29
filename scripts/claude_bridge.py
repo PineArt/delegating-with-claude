@@ -1,6 +1,7 @@
 """
-Claude bridge script for Codex skills.
-Wraps the Claude CLI and normalizes its response into a small JSON envelope.
+Internal Claude CLI transport for Codex skills.
+Used by claude_delegate.py; call directly only for low-level diagnostics.
+Normalizes Claude CLI responses into a small JSON envelope.
 """
 from __future__ import annotations
 

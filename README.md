@@ -27,16 +27,17 @@ Optional:
 - `repo_facts`
 - `open_questions`
 
-## Delegate Wrapper
+## Delegate Entrypoint
 
-This skill is self-contained and now ships the required scripts locally:
+This skill is self-contained. Use the delegate wrapper as the normal entrypoint:
 
 - `scripts/claude_delegate.py`
-- `scripts/claude_bridge.py`
+
+It also ships `scripts/claude_bridge.py` as an internal Claude CLI transport used by the delegate wrapper. Call the bridge directly only for low-level diagnostics, such as checking whether Claude CLI launch, stdin transport, or JSON response parsing works without the structured handoff layer.
 
 ## Why A Separate Skill
 
-The bridge and wrapper can transport context, but they cannot infer Codex's internal working context on their own.
+The delegate wrapper can transport context, but it cannot infer Codex's internal working context on its own.
 
 That synthesis step must live in skill instructions, because the model has to decide:
 
