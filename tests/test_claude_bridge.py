@@ -174,6 +174,7 @@ def test_run_claude_sends_multiline_prompt_via_stdin(monkeypatch):
     def fake_subprocess_run(command, **kwargs):
         captured["command"] = command
         captured["input"] = kwargs.get("input")
+        captured["timeout"] = kwargs.get("timeout")
         return subprocess.CompletedProcess(
             command,
             0,
@@ -202,3 +203,34 @@ def test_run_claude_sends_multiline_prompt_via_stdin(monkeypatch):
     assert result["success"] is True
     assert captured["input"] == multiline_prompt
     assert multiline_prompt not in captured["command"]
+    assert captured["timeout"] == 360
+
+
+def test_run_claude_reports_timeout_after_six_minutes(monkeypatch):
+    bridge = load_bridge()
+
+    def fake_subprocess_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout"))
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(bridge, "_resolve_executable", lambda name, env: name)
+    monkeypatch.setattr(bridge, "_rewrite_npm_wrapper", lambda command, env: command)
+
+    result = bridge.run_claude(
+        SimpleNamespace(
+            PROMPT="slow prompt",
+            cd=str(ROOT),
+            SESSION_ID="",
+            permission_mode="bypassPermissions",
+            add_dir=[],
+            model="",
+            system_prompt="",
+            append_system_prompt="",
+            return_raw_result=False,
+        )
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Claude invocation timed out after 360 seconds.",
+    }

@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+CLAUDE_RUN_TIMEOUT_SECONDS = 6 * 60
+
+
 def _configure_stdio() -> None:
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
@@ -199,12 +202,18 @@ def run_claude(args: argparse.Namespace) -> Dict[str, Any]:
             encoding="utf-8",
             errors="replace",
             env=env,
+            timeout=CLAUDE_RUN_TIMEOUT_SECONDS,
             check=False,
         )
     except FileNotFoundError as error:
         return {"success": False, "error": f"Claude executable not found: {error}"}
     except OSError as error:
         return {"success": False, "error": f"Failed to launch Claude: {error}"}
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": f"Claude invocation timed out after {CLAUDE_RUN_TIMEOUT_SECONDS} seconds.",
+        }
 
     parsed = _extract_result_json(completed.stdout)
     stderr = completed.stderr.strip()
