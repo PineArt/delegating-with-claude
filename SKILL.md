@@ -10,7 +10,7 @@ Use this skill when Codex should delegate work to Claude **with a structured han
 This skill is the workflow layer on top of `collaborating-with-claude`:
 
 - First, synthesize what Codex already knows into a compact handoff.
-- Second, pass that handoff through `scripts/claude_delegate.py`.
+- Second, pass that handoff through `python scripts/claude_delegate.py`.
 - Third, continue with `SESSION_ID` if more Claude turns are needed.
 
 Use `collaborating-with-claude` directly only when you explicitly want low-level manual control.
@@ -23,7 +23,7 @@ Before calling Claude, always do the following:
 2. Convert that context into a structured handoff.
 3. Prefer structured fields over free-form `--context`.
 4. Omit unknown sections instead of inventing details.
-5. Call `scripts/claude_delegate.py` with the structured handoff.
+5. Call `python scripts/claude_delegate.py` with the structured handoff.
 
 Do not skip handoff generation unless the user explicitly asks for raw passthrough.
 
@@ -82,7 +82,7 @@ The wrapper does not infer review items from numbered prose in `--PROMPT`; use `
 
 ## Recommended Command Pattern
 
-Use `scripts/claude_delegate.py` as the normal entrypoint.
+Use `python scripts/claude_delegate.py` as the normal entrypoint.
 `scripts/claude_bridge.py` is an internal transport and diagnostic tool for isolating Claude CLI launch, stdin transport, or JSON response parsing. Do not call it for ordinary delegation.
 
 ```bash

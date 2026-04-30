@@ -12,7 +12,7 @@ Instead of calling Claude with ad-hoc `--context` text, this skill standardizes 
 
 1. Codex synthesizes the current known context.
 2. Codex maps it into a fixed structured handoff.
-3. Codex calls `scripts/claude_delegate.py`.
+3. Codex calls `python scripts/claude_delegate.py`.
 
 ## Recommended Structured Fields
 
@@ -29,9 +29,9 @@ Optional:
 
 ## Delegate Entrypoint
 
-This skill is self-contained. Use the delegate wrapper as the normal entrypoint:
+This skill is self-contained. Run the delegate wrapper explicitly with Python as the normal entrypoint:
 
-- `scripts/claude_delegate.py`
+- `python scripts/claude_delegate.py`
 
 It also ships `scripts/claude_bridge.py` as an internal Claude CLI transport used by the delegate wrapper. Call the bridge directly only for low-level diagnostics, such as checking whether Claude CLI launch, stdin transport, or JSON response parsing works without the structured handoff layer.
 
