@@ -33,6 +33,8 @@ This skill is self-contained. Run the delegate wrapper explicitly with Python as
 
 - `python scripts/claude_delegate.py`
 
+Never execute `scripts/claude_delegate.py` directly, including for `--help` smoke checks. On Windows, direct `.py` execution can exit without useful stdout depending on file association behavior.
+
 It also ships `scripts/claude_bridge.py` as an internal Claude CLI transport used by the delegate wrapper. Call the bridge directly only for low-level diagnostics, such as checking whether Claude CLI launch, stdin transport, or JSON response parsing works without the structured handoff layer.
 
 ## Why A Separate Skill
@@ -46,6 +48,10 @@ That synthesis step must live in skill instructions, because the model has to de
 - what should be omitted
 
 ## Minimal Example
+
+```bash
+python scripts/claude_delegate.py --help
+```
 
 ```bash
 python scripts/claude_delegate.py \
