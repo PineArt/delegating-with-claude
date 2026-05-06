@@ -16,7 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from claude_bridge import run_claude
+from claude_bridge import DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS, positive_int, run_claude
 
 
 def _normalize_items(values: Iterable[str]) -> List[str]:
@@ -143,6 +143,7 @@ def call_bridge(args: argparse.Namespace, prompt_to_send: str) -> dict:
         system_prompt="",
         append_system_prompt="",
         return_raw_result=args.return_raw_result,
+        timeout_seconds=args.timeout_seconds,
     )
     return run_claude(bridge_args)
 
@@ -173,6 +174,12 @@ def main() -> None:
     parser.add_argument("--add-dir", action="append", default=[], help="Additional directories to allow tool access to.")
     parser.add_argument("--model", default="", help="Claude model override. Only set this when explicitly requested by the user.")
     parser.add_argument("--return-raw-result", action="store_true", help="Include Claude's raw JSON payload in the output.")
+    parser.add_argument(
+        "--timeout-seconds",
+        type=positive_int,
+        default=DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS,
+        help=f"Maximum seconds to wait for Claude CLI. Defaults to {DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS}.",
+    )
     args = parser.parse_args()
 
     handoff = build_handoff(args)

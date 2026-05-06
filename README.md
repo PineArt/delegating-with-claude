@@ -37,6 +37,8 @@ Never execute `scripts/claude_delegate.py` directly, including for `--help` smok
 
 It also ships `scripts/claude_bridge.py` as an internal Claude CLI transport used by the delegate wrapper. Call the bridge directly only for low-level diagnostics, such as checking whether Claude CLI launch, stdin transport, or JSON response parsing works without the structured handoff layer.
 
+The delegate wrapper waits up to 360 seconds for Claude CLI by default. Use `--timeout-seconds <seconds>` when a review-heavy or gate-heavy delegation should wait longer.
+
 ## Why A Separate Skill
 
 The delegate wrapper can transport context, but it cannot infer Codex's internal working context on its own.

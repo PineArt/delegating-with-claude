@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-CLAUDE_RUN_TIMEOUT_SECONDS = 6 * 60
+DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS = 6 * 60
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _configure_stdio() -> None:
@@ -180,10 +187,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include Claude's raw JSON result payload in the output.",
     )
+    parser.add_argument(
+        "--timeout-seconds",
+        type=positive_int,
+        default=DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS,
+        help=f"Maximum seconds to wait for Claude CLI. Defaults to {DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS}.",
+    )
     return parser
 
 
 def run_claude(args: argparse.Namespace) -> Dict[str, Any]:
+    timeout_seconds = getattr(args, "timeout_seconds", DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS)
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
@@ -203,7 +217,7 @@ def run_claude(args: argparse.Namespace) -> Dict[str, Any]:
             encoding="utf-8",
             errors="replace",
             env=env,
-            timeout=CLAUDE_RUN_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
             check=False,
         )
     except FileNotFoundError as error:
@@ -213,7 +227,7 @@ def run_claude(args: argparse.Namespace) -> Dict[str, Any]:
     except subprocess.TimeoutExpired:
         return {
             "success": False,
-            "error": f"Claude invocation timed out after {CLAUDE_RUN_TIMEOUT_SECONDS} seconds.",
+            "error": f"Claude invocation timed out after {timeout_seconds} seconds.",
         }
 
     parsed = _extract_result_json(completed.stdout)

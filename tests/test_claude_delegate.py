@@ -202,6 +202,33 @@ def test_first_call_uses_handoff_and_marks_result(monkeypatch, capsys):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def test_timeout_seconds_is_forwarded_to_bridge(monkeypatch, capsys):
+    delegate = load_delegate()
+    result = {"success": True, "SESSION_ID": "session-1", "agent_messages": "OK"}
+    calls = install_fake_bridge(delegate, monkeypatch, result)
+    tmp_dir = make_temp_dir()
+    try:
+        output = run_delegate(
+            delegate,
+            monkeypatch,
+            capsys,
+            [
+                "--cd",
+                str(tmp_dir),
+                "--timeout-seconds",
+                "900",
+                "--PROMPT",
+                "Reply with exactly OK.",
+            ],
+        )
+
+        parsed = json.loads(output)
+        assert parsed["success"] is True
+        assert calls[0]["args"].timeout_seconds == 900
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def test_resume_without_context_on_resume_sends_raw_prompt(monkeypatch, capsys):
     delegate = load_delegate()
     result = {"success": True, "SESSION_ID": "session-1", "agent_messages": "OK"}

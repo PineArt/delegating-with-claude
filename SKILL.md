@@ -85,6 +85,7 @@ The wrapper does not infer review items from numbered prose in `--PROMPT`; use `
 Use `python scripts/claude_delegate.py` as the normal entrypoint.
 Never execute `scripts/claude_delegate.py` directly, including for `--help` smoke checks. On Windows, direct `.py` execution can exit without useful stdout depending on file association behavior.
 `scripts/claude_bridge.py` is an internal transport and diagnostic tool for isolating Claude CLI launch, stdin transport, or JSON response parsing. Do not call it for ordinary delegation.
+The delegate wrapper waits up to 360 seconds for Claude CLI by default. Add `--timeout-seconds <seconds>` when the user explicitly asks to wait longer or the handoff is review-heavy enough to justify it.
 
 ```bash
 python scripts/claude_delegate.py --help

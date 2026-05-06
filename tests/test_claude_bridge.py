@@ -130,6 +130,29 @@ def test_bridge_cli_and_import_api_return_same_envelope(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == expected
 
 
+def test_bridge_cli_rejects_nonpositive_timeout(monkeypatch):
+    bridge = load_bridge()
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "claude_bridge.py",
+            "--cd",
+            str(ROOT),
+            "--PROMPT",
+            "Reply with exactly OK.",
+            "--timeout-seconds",
+            "0",
+        ],
+    )
+
+    try:
+        bridge.main()
+    except SystemExit as error:
+        assert error.code == 2
+    else:
+        raise AssertionError("Expected argparse to reject a nonpositive timeout")
+
+
 def test_run_claude_can_be_called_twice_without_prompt_state_leak(monkeypatch):
     bridge = load_bridge()
     seen_prompts = []
@@ -197,16 +220,17 @@ def test_run_claude_sends_multiline_prompt_via_stdin(monkeypatch):
             system_prompt="",
             append_system_prompt="",
             return_raw_result=False,
+            timeout_seconds=900,
         )
     )
 
     assert result["success"] is True
     assert captured["input"] == multiline_prompt
     assert multiline_prompt not in captured["command"]
-    assert captured["timeout"] == 360
+    assert captured["timeout"] == 900
 
 
-def test_run_claude_reports_timeout_after_six_minutes(monkeypatch):
+def test_run_claude_reports_default_timeout_after_six_minutes(monkeypatch):
     bridge = load_bridge()
 
     def fake_subprocess_run(command, **kwargs):
@@ -233,4 +257,35 @@ def test_run_claude_reports_timeout_after_six_minutes(monkeypatch):
     assert result == {
         "success": False,
         "error": "Claude invocation timed out after 360 seconds.",
+    }
+
+
+def test_run_claude_reports_configured_timeout(monkeypatch):
+    bridge = load_bridge()
+
+    def fake_subprocess_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout"))
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(bridge, "_resolve_executable", lambda name, env: name)
+    monkeypatch.setattr(bridge, "_rewrite_npm_wrapper", lambda command, env: command)
+
+    result = bridge.run_claude(
+        SimpleNamespace(
+            PROMPT="slow prompt",
+            cd=str(ROOT),
+            SESSION_ID="",
+            permission_mode="bypassPermissions",
+            add_dir=[],
+            model="",
+            system_prompt="",
+            append_system_prompt="",
+            return_raw_result=False,
+            timeout_seconds=900,
+        )
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Claude invocation timed out after 900 seconds.",
     }
