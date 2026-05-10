@@ -19,14 +19,16 @@ Final Validation Evidence:
 - `PYTHONDONTWRITEBYTECODE=1 python -m py_compile scripts\claude_delegate.py scripts\claude_jobs.py scripts\claude_bridge.py` passed.
 - `pytest -q tests\test_claude_delegate.py tests\test_claude_bridge.py` passed with `33 passed in 1.64s`.
 - `git diff --check` completed with only CRLF warnings.
-- Harness validator passed at S7 before final S8 record; final `--stage all` is required immediately before commit.
+- `python C:\Users\wangsong\.codex\skills\harness-engineering-workflow\scripts\validate_harness_run.py exec-plans\active\2026-05-10-async-delegate-jobs --stage all` passed immediately before commit.
 - Quality Gate final re-gate verdict: Pass, no blockers.
 
 Commit Evidence:
-Pending before final validation.
+- Implementation and harness commit: `e8d7c855d76be79143d7ff541798af22835f5bf3` (`Add async Claude delegate jobs`).
+- Publish-evidence record commit: pending.
 
 Push Evidence:
-Pending before final validation.
+- Branch `codex/async-delegate-jobs` pushed to `origin/codex/async-delegate-jobs`.
+- GitHub compare/PR URL suggested by remote: `https://github.com/PineArt/delegating-with-claude/pull/new/codex/async-delegate-jobs`.
 
 Residual Risks:
 - `.claude-delegate-jobs/` remains local ignored state; cleanup is intentionally manual for now.
