@@ -53,36 +53,6 @@ def make_args(**overrides):
     return SimpleNamespace(**values)
 
 
-def install_fake_bridge(delegate, monkeypatch, result):
-    calls = []
-
-    if hasattr(delegate, "call_bridge"):
-        def fake_call_bridge(args, prompt_to_send):
-            calls.append({"prompt": prompt_to_send, "args": args})
-            return dict(result)
-
-        monkeypatch.setattr(delegate, "call_bridge", fake_call_bridge)
-        return calls
-
-    def fake_run(command, **kwargs):
-        calls.append({"command": command, "kwargs": kwargs})
-        return SimpleNamespace(
-            returncode=0,
-            stdout=json.dumps(result, ensure_ascii=False),
-            stderr="",
-        )
-
-    monkeypatch.setattr(delegate.subprocess, "run", fake_run)
-    return calls
-
-
-def sent_prompt(call):
-    if "prompt" in call:
-        return call["prompt"]
-    command = call["command"]
-    return command[command.index("--PROMPT") + 1]
-
-
 def run_delegate(delegate, monkeypatch, capsys, argv):
     monkeypatch.setattr(sys, "argv", ["claude_delegate.py", *argv])
     delegate.main()
@@ -163,9 +133,9 @@ def test_preview_handoff_saves_and_prints_utf8(monkeypatch, capsys):
         output = run_delegate(
             delegate,
             monkeypatch,
-            capsys,
+                capsys,
             [
-                "run",
+                "start",
                 "--cd",
                 str(tmp_dir),
                 "--context-summary",
@@ -185,20 +155,23 @@ def test_preview_handoff_saves_and_prints_utf8(monkeypatch, capsys):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def test_first_call_uses_handoff_and_marks_result(monkeypatch, capsys):
+def test_start_uses_handoff_and_records_prompt(monkeypatch, capsys):
     delegate = load_delegate()
-    result = {"success": True, "SESSION_ID": "session-1", "agent_messages": "OK"}
-    calls = install_fake_bridge(delegate, monkeypatch, result)
     tmp_dir = make_temp_dir()
     try:
+        job_store = tmp_dir / "jobs"
+        monkeypatch.setattr("claude_jobs._spawn_worker", lambda store, job_id, worker_log_path: 4321)
+
         output = run_delegate(
             delegate,
             monkeypatch,
             capsys,
             [
-                "run",
+                "start",
                 "--cd",
                 str(tmp_dir),
+                "--job-store",
+                str(job_store),
                 "--context-summary",
                 "sanity check",
                 "--PROMPT",
@@ -208,54 +181,47 @@ def test_first_call_uses_handoff_and_marks_result(monkeypatch, capsys):
 
         parsed = json.loads(output)
         assert parsed["success"] is True
-        assert parsed["handoff_used"] is True
-        assert sent_prompt(calls[0]).startswith("Please complete this task directly:")
+        assert parsed["state"] == "starting"
+        record = json.loads(Path(parsed["paths"]["record"]).read_text(encoding="utf-8"))
+        assert record["handoff_used"] is True
+        assert Path(record["paths"]["prompt"]).read_text(encoding="utf-8").startswith("Please complete this task directly:")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def test_timeout_seconds_is_forwarded_to_bridge(monkeypatch, capsys):
+def test_run_subcommand_is_removed(monkeypatch, capsys):
     delegate = load_delegate()
-    result = {"success": True, "SESSION_ID": "session-1", "agent_messages": "OK"}
-    calls = install_fake_bridge(delegate, monkeypatch, result)
+    monkeypatch.setattr(sys, "argv", ["claude_delegate.py", "run", "--help"])
+
+    try:
+        delegate.main()
+    except SystemExit as error:
+        assert error.code == 2
+    else:
+        raise AssertionError("Expected removed run subcommand to fail")
+
+    captured = capsys.readouterr()
+    assert "invalid choice: 'run'" in captured.err
+    assert "start" in captured.err
+
+
+def test_resume_without_context_on_resume_stores_raw_prompt(monkeypatch, capsys):
+    delegate = load_delegate()
     tmp_dir = make_temp_dir()
     try:
+        job_store = tmp_dir / "jobs"
+        monkeypatch.setattr("claude_jobs._spawn_worker", lambda store, job_id, worker_log_path: 4321)
+
         output = run_delegate(
             delegate,
             monkeypatch,
             capsys,
             [
-                "run",
+                "resume",
                 "--cd",
                 str(tmp_dir),
-                "--timeout-seconds",
-                "900",
-                "--PROMPT",
-                "Reply with exactly OK.",
-            ],
-        )
-
-        parsed = json.loads(output)
-        assert parsed["success"] is True
-        assert calls[0]["args"].timeout_seconds == 900
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-
-
-def test_resume_without_context_on_resume_sends_raw_prompt(monkeypatch, capsys):
-    delegate = load_delegate()
-    result = {"success": True, "SESSION_ID": "session-1", "agent_messages": "OK"}
-    calls = install_fake_bridge(delegate, monkeypatch, result)
-    tmp_dir = make_temp_dir()
-    try:
-        output = run_delegate(
-            delegate,
-            monkeypatch,
-            capsys,
-            [
-                "run",
-                "--cd",
-                str(tmp_dir),
+                "--job-store",
+                str(job_store),
                 "--SESSION_ID",
                 "session-1",
                 "--context-summary",
@@ -267,8 +233,9 @@ def test_resume_without_context_on_resume_sends_raw_prompt(monkeypatch, capsys):
 
         parsed = json.loads(output)
         assert parsed["success"] is True
-        assert parsed["handoff_used"] is False
-        assert sent_prompt(calls[0]) == "Reply with exactly OK."
+        record = json.loads(Path(parsed["paths"]["record"]).read_text(encoding="utf-8"))
+        assert record["handoff_used"] is False
+        assert Path(record["paths"]["prompt"]).read_text(encoding="utf-8") == "Reply with exactly OK."
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -297,7 +264,8 @@ def test_no_subcommand_is_rejected_with_migration_hint(monkeypatch, capsys):
             raise AssertionError("Expected no-subcommand usage to fail")
 
         captured = capsys.readouterr()
-        assert "Migration: old no-subcommand usage was removed" in captured.err
+        assert "Use `start/status/wait/stop/resume` for async jobs" in captured.err
+        assert "claude_bridge.py" in captured.err
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -316,23 +284,15 @@ def test_top_level_help_still_works(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "start" in captured.out
     assert "status" in captured.out
-    assert "Migration: old no-subcommand usage was removed" in captured.out
+    assert "claude_bridge.py" in captured.out
+    assert "{start,resume,status,wait,stop}" in captured.out
+    assert "{run" not in captured.out
+    assert ",run" not in captured.out
+    assert "run}" not in captured.out
 
 
-def test_timeout_seconds_only_belongs_to_run_subcommand(monkeypatch, capsys):
+def test_delegate_subcommands_do_not_expose_timeout_seconds(monkeypatch, capsys):
     delegate = load_delegate()
-    monkeypatch.setattr(sys, "argv", ["claude_delegate.py", "run", "--help"])
-
-    try:
-        delegate.main()
-    except SystemExit as error:
-        assert error.code == 0
-    else:
-        raise AssertionError("Expected run help to exit")
-
-    run_help = capsys.readouterr().out
-    assert "--timeout-seconds" in run_help
-
     for subcommand in ("start", "resume"):
         monkeypatch.setattr(sys, "argv", ["claude_delegate.py", subcommand, "--help"])
         try:
@@ -568,7 +528,6 @@ def test_status_reads_local_records_only(monkeypatch, capsys):
             json.dumps({"job_id": job_id, "state": "running", "created_at": "2026-05-10T00:00:00Z"}),
             encoding="utf-8",
         )
-        monkeypatch.setattr(delegate, "call_bridge", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bridge called")))
 
         output = run_delegate(
             delegate,

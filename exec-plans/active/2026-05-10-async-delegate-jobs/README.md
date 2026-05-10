@@ -3,11 +3,11 @@
 ## Step S0. Task Brief
 
 Goal:
-Refactor the Claude delegate wrapper into an explicit async job model with `start`, `status`, `wait`, `stop`, `resume`, and `run`, removing the old no-subcommand compatibility path.
+Refactor the Claude delegate wrapper into an explicit async-only job model with `start`, `status`, `wait`, `stop`, and `resume`, removing the old no-subcommand compatibility path and the former high-level synchronous `run` command.
 
 Non-goals:
 - No unrelated refactors outside the delegate wrapper, its helper layer, and targeted docs/tests.
-- No attempt to preserve the legacy no-subcommand entrypoint behavior.
+- No attempt to preserve the legacy no-subcommand entrypoint behavior or high-level synchronous `run`.
 - No live remote deployment work in this run.
 
 Constraints:
@@ -19,12 +19,12 @@ Constraints:
 
 Success Criteria:
 - The CLI exposes explicit subcommands for the async job model.
-- The old no-subcommand invocation fails with a migration hint.
+- The old no-subcommand invocation fails with a migration hint, and `run` is rejected as an invalid subcommand.
 - Tests prove wait timeout does not kill, stop does kill, status is local-only, and concurrent same-session resumes are rejected.
 - The run validates through the harness script and focused test commands.
 
 Human Decision Points:
-- Whether the default convenience path should be `run` or something else.
+- Whether the default convenience path should be async-only or preserve synchronous `run`; user selected async-only.
 - Whether any extra job-store cleanup policy is needed after completion.
 
 ## Run Workspace
@@ -44,6 +44,7 @@ Artifact Index:
 - checkpoints/0003-S5.md
 - checkpoints/0004-S7.md
 - checkpoints/0005-S8.md
+- checkpoints/0006-S8.md
 - README.md
 - role-owner-table.md
 - responsibility-matrix.md

@@ -8,7 +8,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Iterable, List, Optional
 
 
@@ -16,7 +15,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from claude_bridge import DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS, effort_value, positive_int, run_claude
+from claude_bridge import effort_value, positive_int
 from claude_jobs import local_status, stable_job_store, start_job, stop_job, wait_job
 
 
@@ -133,27 +132,9 @@ def build_handoff(args: argparse.Namespace) -> str:
     return "\n".join(parts).strip() + "\n"
 
 
-def call_bridge(args: argparse.Namespace, prompt_to_send: str) -> dict:
-    bridge_args = SimpleNamespace(
-        PROMPT=prompt_to_send,
-        cd=args.cd,
-        SESSION_ID=args.SESSION_ID,
-        permission_mode=args.permission_mode,
-        add_dir=args.add_dir,
-        model=args.model,
-        effort=args.effort or "",
-        system_prompt="",
-        append_system_prompt="",
-        return_raw_result=args.return_raw_result,
-        timeout_seconds=args.timeout_seconds,
-    )
-    return run_claude(bridge_args)
-
-
 def _add_delegate_arguments(
     parser: argparse.ArgumentParser,
     *,
-    include_timeout: bool,
     require_session_id: bool = False,
 ) -> None:
     parser.add_argument("--PROMPT", required=True, help="Task instruction for Claude.")
@@ -180,13 +161,6 @@ def _add_delegate_arguments(
     parser.add_argument("--model", default="", help="Claude model override. Only set this when explicitly requested by the user.")
     parser.add_argument("--effort", default=None, type=effort_value, metavar="EFFORT", help="Claude effort override. Choices: low, medium, high, xhigh, max.")
     parser.add_argument("--return-raw-result", action="store_true", help="Include Claude's raw JSON payload in the output.")
-    if include_timeout:
-        parser.add_argument(
-            "--timeout-seconds",
-            type=positive_int,
-            default=DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS,
-            help=f"Maximum seconds to wait for Claude CLI. Defaults to {DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS}.",
-        )
 
 
 def _add_job_store_argument(parser: argparse.ArgumentParser) -> None:
@@ -238,20 +212,6 @@ def _prepare_prompt(args: argparse.Namespace) -> tuple[str, str, bool]:
 
 def _print_json(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
-
-
-def _cmd_run(args: argparse.Namespace) -> None:
-    handoff, prompt_to_send, handoff_used = _prepare_prompt(args)
-    if args.preview_handoff:
-        return
-
-    result = call_bridge(args, prompt_to_send)
-
-    if args.save_handoff:
-        result["handoff_path"] = str(Path(args.save_handoff))
-    result["handoff_used"] = handoff_used
-
-    _print_json(result)
 
 
 def _cmd_start(args: argparse.Namespace) -> None:
@@ -306,24 +266,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Primary structured Claude delegation entrypoint",
         epilog=(
-            "Migration: old no-subcommand usage was removed. Use `run` for a synchronous "
-            "delegation, or `start/status/wait/stop/resume` for async jobs."
+            "Use `start/status/wait/stop/resume` for async jobs. For low-level synchronous "
+            "diagnostics, call `python scripts/claude_bridge.py` directly."
         ),
     )
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
 
-    run_parser = subparsers.add_parser("run", help="Run a delegation synchronously.")
-    _add_delegate_arguments(run_parser, include_timeout=True)
-    run_parser.set_defaults(func=_cmd_run)
-
     start_parser = subparsers.add_parser("start", help="Start an async delegation job and return immediately.")
-    _add_delegate_arguments(start_parser, include_timeout=False)
+    _add_delegate_arguments(start_parser)
     _add_job_store_argument(start_parser)
     _add_notification_arguments(start_parser)
     start_parser.set_defaults(func=_cmd_start)
 
     resume_parser = subparsers.add_parser("resume", help="Start an async resume job for an existing Claude SESSION_ID.")
-    _add_delegate_arguments(resume_parser, include_timeout=False, require_session_id=True)
+    _add_delegate_arguments(resume_parser, require_session_id=True)
     _add_job_store_argument(resume_parser)
     _add_notification_arguments(resume_parser)
     resume_parser.set_defaults(func=_cmd_resume)
@@ -353,12 +309,11 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     raw_args = list(argv) if argv is not None else sys.argv[1:]
     if raw_args and raw_args[0].startswith("-") and raw_args[0] not in {"-h", "--help"}:
         parser.error(
-            "Migration: old no-subcommand usage was removed. Use `run` for synchronous delegation "
-            "or `start/status/wait/stop/resume` for async jobs."
+            "Use `start/status/wait/stop/resume` for async jobs. For synchronous diagnostics, use claude_bridge.py."
         )
     args = parser.parse_args(raw_args)
     if not getattr(args, "subcommand", ""):
-        parser.error("missing subcommand. Use run, start, status, wait, stop, or resume.")
+        parser.error("missing subcommand. Use start, status, wait, stop, or resume.")
     return args
 
 

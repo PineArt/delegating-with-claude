@@ -1,1 +1,1 @@
-Current Checkpoint: checkpoints/0005-S8.md
+Current Checkpoint: checkpoints/0006-S8.md

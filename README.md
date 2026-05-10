@@ -31,14 +31,17 @@ Optional:
 
 This skill is self-contained. Run the delegate wrapper explicitly with Python and a subcommand:
 
-- `python scripts/claude_delegate.py run` for a synchronous one-shot delegation
-- `python scripts/claude_delegate.py start` for an async delegation job
+- `python scripts/claude_delegate.py start` to create an async delegation job
+- `python scripts/claude_delegate.py status` to inspect local job state
+- `python scripts/claude_delegate.py wait` to wait for a job without making wait timeout kill it
+- `python scripts/claude_delegate.py stop` to explicitly terminate a job
+- `python scripts/claude_delegate.py resume` to continue an existing Claude session as an async job
 
 Never execute `scripts/claude_delegate.py` directly, including for `--help` smoke checks. On Windows, direct `.py` execution can exit without useful stdout depending on file association behavior.
 
 It also ships `scripts/claude_bridge.py` as an internal Claude CLI transport used by the delegate wrapper. Call the bridge directly only for low-level diagnostics, such as checking whether Claude CLI launch, stdin transport, or JSON response parsing works without the structured handoff layer.
 
-The old no-subcommand invocation is intentionally removed. Use `run` when you want a blocking call, or `start/status/wait/stop/resume` when the main Codex thread should choose how long to wait and how often to poll.
+The high-level delegate wrapper is async-only. The old no-subcommand invocation and the former synchronous `run` command are intentionally removed. For normal delegation, use `start/status/wait/stop/resume`; for a one-shot flow, call `start` and then `wait`.
 
 Async job semantics:
 
@@ -50,7 +53,7 @@ Async job semantics:
 - `start/resume --notify-file <path>` writes a terminal-state JSON payload when the job finishes.
 - `start/resume --notify-command <json-argv>` runs a completion hook after the job finishes; the same JSON payload is sent on stdin.
 
-`run` keeps `--timeout-seconds <seconds>` for short one-shot delegations. Async jobs use `wait --timeout` instead.
+`--timeout-seconds` belongs to `scripts/claude_bridge.py` diagnostics, not to the high-level delegate wrapper. Async jobs use `wait --timeout` instead; when that wait times out, the Claude job keeps running until it finishes or `stop` is called.
 Use `--model <model>` and `--effort <low|medium|high|xhigh|max>` only when the user explicitly asks for those overrides.
 
 ## Why A Separate Skill
@@ -70,7 +73,7 @@ python scripts/claude_delegate.py --help
 ```
 
 ```bash
-python scripts/claude_delegate.py run \
+python scripts/claude_delegate.py start \
   --cd "/project" \
   --context-summary "Short high-confidence summary." \
   --context-file-ref "src/app.ts :: entry point" \

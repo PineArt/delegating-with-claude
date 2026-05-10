@@ -1,12 +1,12 @@
 ## Step S4. Execution Output Record
 
 Objective:
-Implement an explicit async delegate job model with `start`, `status`, `wait`, `stop`, `resume`, and `run`.
+Implement an explicit async-only delegate job model with `start`, `status`, `wait`, `stop`, and `resume`.
 
 Inputs:
 - S0-S3 harness artifacts in this run workspace.
 - Opus consensus recommending the async job model.
-- User decision to remove old no-subcommand compatibility.
+- User decision to remove old no-subcommand compatibility and the high-level synchronous `run` command.
 
 Method:
 - Added explicit subcommand parsing in `scripts/claude_delegate.py`.
@@ -16,10 +16,10 @@ Method:
 - Added `.claude-delegate-jobs/` to `.gitignore`.
 
 Outputs:
-- `scripts/claude_delegate.py`: explicit subcommands and migration error for no-subcommand usage.
+- `scripts/claude_delegate.py`: explicit async subcommands, migration error for no-subcommand usage, and no high-level synchronous `run`.
 - `scripts/claude_jobs.py`: local job store, worker launcher, status/wait/stop/session lock handling.
 - `tests/test_claude_delegate.py`: tests for explicit subcommands, async wait/stop/status/session lock behavior, resolved background `cd`, launch-failure lock cleanup, and help contracts.
-- `README.md` and `SKILL.md`: documented async command surface.
+- `README.md` and `SKILL.md`: documented async-only command surface and bridge-only synchronous diagnostics.
 
 Acceptance:
 - `python -m py_compile scripts\claude_delegate.py scripts\claude_jobs.py scripts\claude_bridge.py` passed with `PYTHONDONTWRITEBYTECODE=1`.

@@ -23,7 +23,7 @@ Before calling Claude, always do the following:
 2. Convert that context into a structured handoff.
 3. Prefer structured fields over free-form `--context`.
 4. Omit unknown sections instead of inventing details.
-5. Call `python scripts/claude_delegate.py run` or `python scripts/claude_delegate.py start` with the structured handoff.
+5. Call `python scripts/claude_delegate.py start` or `python scripts/claude_delegate.py resume` with the structured handoff.
 
 Do not skip handoff generation unless the user explicitly asks for raw passthrough.
 
@@ -85,7 +85,7 @@ The wrapper does not infer review items from numbered prose in `--PROMPT`; use `
 Use `python scripts/claude_delegate.py <subcommand>` as the normal entrypoint.
 Never execute `scripts/claude_delegate.py` directly, including for `--help` smoke checks. On Windows, direct `.py` execution can exit without useful stdout depending on file association behavior.
 `scripts/claude_bridge.py` is an internal transport and diagnostic tool for isolating Claude CLI launch, stdin transport, or JSON response parsing. Do not call it for ordinary delegation.
-The delegate wrapper requires an explicit subcommand. The old no-subcommand invocation is removed; use `run` for a synchronous one-shot delegation, or `start/status/wait/stop/resume` for async jobs.
+The delegate wrapper requires an explicit subcommand and is async-only. The old no-subcommand invocation and the former synchronous `run` command are removed; use `start/status/wait/stop/resume` for delegation. For a one-shot flow, call `start` and then `wait`.
 
 Async job semantics:
 
@@ -97,7 +97,7 @@ Async job semantics:
 - `start/resume --notify-file <path>` writes a terminal-state JSON payload when the job finishes.
 - `start/resume --notify-command <json-argv>` runs a completion hook after the job finishes; the same JSON payload is sent on stdin.
 
-Use `run --timeout-seconds <seconds>` only for synchronous one-shot delegations. Async jobs use `wait --timeout` so the main Codex thread controls polling and waiting.
+`--timeout-seconds` belongs to `scripts/claude_bridge.py` diagnostics, not to the high-level delegate wrapper. Async jobs use `wait --timeout` so the main Codex thread controls polling and waiting without killing the Claude job.
 Use `--model <model>` and `--effort <low|medium|high|xhigh|max>` only when the user explicitly asks for those overrides.
 
 ```bash
@@ -105,7 +105,7 @@ python scripts/claude_delegate.py --help
 ```
 
 ```bash
-python scripts/claude_delegate.py run \
+python scripts/claude_delegate.py start \
   --cd "/project" \
   --context-summary "Short high-confidence summary." \
   --context-file-ref "src/app.ts :: entry point" \
@@ -122,7 +122,7 @@ python scripts/claude_delegate.py run \
 If the handoff is complex, expensive, or likely to be reused, preview or save it first:
 
 ```bash
-python scripts/claude_delegate.py run \
+python scripts/claude_delegate.py start \
   --cd "/project" \
   --context-summary "..." \
   --context-file-ref "src/app.ts :: entry point" \
@@ -133,7 +133,7 @@ python scripts/claude_delegate.py run \
 Or save it without sending:
 
 ```bash
-python scripts/claude_delegate.py run \
+python scripts/claude_delegate.py start \
   --cd "/project" \
   --context-summary "..." \
   --preview-handoff \
@@ -153,7 +153,7 @@ python scripts/claude_delegate.py run \
 ### Code Review Delegation
 
 ```bash
-python scripts/claude_delegate.py run \
+python scripts/claude_delegate.py start \
   --cd "/project" \
   --context-summary "Recent changes affect cancellation flow in gallery polling." \
   --context-file-ref "frontend/src/pages/Gallery/index.tsx :: gallery page polling integration" \

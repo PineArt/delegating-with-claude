@@ -12,11 +12,11 @@ Evidence: Implementation uses stored worker/child PID visibility to mark stale j
 Owner: Implementer
 Mitigation: Tests cover stale same-session release and terminal lock reclaim; real process edge cases should be watched after first long run.
 
-Risk: `run` still has synchronous timeout semantics.
+Risk: Users may still try the removed high-level `run` command from old examples.
 Severity: Low
-Evidence: `run` deliberately preserves `--timeout-seconds`; async jobs move timeout semantics to `wait`.
+Evidence: This follow-up removes the `run` subparser and updates README/SKILL examples to use `start`/`wait`.
 Owner: Orchestrator
-Mitigation: Docs clearly recommend async jobs for long review-heavy work.
+Mitigation: Tests assert `run` is rejected and public docs state the delegate wrapper is async-only; low-level synchronous diagnostics remain in `scripts/claude_bridge.py`.
 
 Risk: New helper module could be missed in staging.
 Severity: Medium
