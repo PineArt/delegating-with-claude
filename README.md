@@ -12,7 +12,7 @@ Instead of calling Claude with ad-hoc `--context` text, this skill standardizes 
 
 1. Codex synthesizes the current known context.
 2. Codex maps it into a fixed structured handoff.
-3. Codex calls `python scripts/claude_delegate.py`.
+3. Codex calls the delegate wrapper with an explicit subcommand.
 
 ## Recommended Structured Fields
 
@@ -29,15 +29,26 @@ Optional:
 
 ## Delegate Entrypoint
 
-This skill is self-contained. Run the delegate wrapper explicitly with Python as the normal entrypoint:
+This skill is self-contained. Run the delegate wrapper explicitly with Python and a subcommand:
 
-- `python scripts/claude_delegate.py`
+- `python scripts/claude_delegate.py run` for a synchronous one-shot delegation
+- `python scripts/claude_delegate.py start` for an async delegation job
 
 Never execute `scripts/claude_delegate.py` directly, including for `--help` smoke checks. On Windows, direct `.py` execution can exit without useful stdout depending on file association behavior.
 
 It also ships `scripts/claude_bridge.py` as an internal Claude CLI transport used by the delegate wrapper. Call the bridge directly only for low-level diagnostics, such as checking whether Claude CLI launch, stdin transport, or JSON response parsing works without the structured handoff layer.
 
-The delegate wrapper waits up to 360 seconds for Claude CLI by default. Use `--timeout-seconds <seconds>` when a review-heavy or gate-heavy delegation should wait longer.
+The old no-subcommand invocation is intentionally removed. Use `run` when you want a blocking call, or `start/status/wait/stop/resume` when the main Codex thread should choose how long to wait and how often to poll.
+
+Async job semantics:
+
+- `start` returns a local `job_id` and persists prompt, handoff, stdout, stderr, and job metadata.
+- `status` reads local job state only; it does not contact Claude.
+- `wait --timeout <seconds>` only stops waiting and reports `timed_out`; it never kills the job.
+- `stop` is the only user-facing command that terminates a running job.
+- `resume --SESSION_ID <id>` starts an async resume job and refuses to run when the same session already has a running job.
+
+`run` keeps `--timeout-seconds <seconds>` for short one-shot delegations. Async jobs use `wait --timeout` instead.
 
 ## Why A Separate Skill
 
@@ -56,7 +67,7 @@ python scripts/claude_delegate.py --help
 ```
 
 ```bash
-python scripts/claude_delegate.py \
+python scripts/claude_delegate.py run \
   --cd "/project" \
   --context-summary "Short high-confidence summary." \
   --context-file-ref "src/app.ts :: entry point" \
@@ -64,4 +75,19 @@ python scripts/claude_delegate.py \
   --context-constraint "Keep API unchanged." \
   --context-next-step "Specific next action." \
   --PROMPT "Do the next task."
+```
+
+```bash
+python scripts/claude_delegate.py start \
+  --cd "/project" \
+  --context-summary "Short high-confidence summary." \
+  --context-next-step "Specific next action." \
+  --PROMPT "Review the current plan."
+```
+
+```bash
+python scripts/claude_delegate.py status --job-id "<job_id>"
+python scripts/claude_delegate.py wait --job-id "<job_id>" --timeout 60
+python scripts/claude_delegate.py stop --job-id "<job_id>"
+python scripts/claude_delegate.py resume --SESSION_ID "<session_id>" --cd "/project" --PROMPT "Report progress."
 ```

@@ -10,7 +10,7 @@ Use this skill when Codex should delegate work to Claude **with a structured han
 This skill is the workflow layer on top of `collaborating-with-claude`:
 
 - First, synthesize what Codex already knows into a compact handoff.
-- Second, pass that handoff through `python scripts/claude_delegate.py`.
+- Second, pass that handoff through the delegate wrapper with an explicit subcommand.
 - Third, continue with `SESSION_ID` if more Claude turns are needed.
 
 Use `collaborating-with-claude` directly only when you explicitly want low-level manual control.
@@ -23,7 +23,7 @@ Before calling Claude, always do the following:
 2. Convert that context into a structured handoff.
 3. Prefer structured fields over free-form `--context`.
 4. Omit unknown sections instead of inventing details.
-5. Call `python scripts/claude_delegate.py` with the structured handoff.
+5. Call `python scripts/claude_delegate.py run` or `python scripts/claude_delegate.py start` with the structured handoff.
 
 Do not skip handoff generation unless the user explicitly asks for raw passthrough.
 
@@ -82,17 +82,27 @@ The wrapper does not infer review items from numbered prose in `--PROMPT`; use `
 
 ## Recommended Command Pattern
 
-Use `python scripts/claude_delegate.py` as the normal entrypoint.
+Use `python scripts/claude_delegate.py <subcommand>` as the normal entrypoint.
 Never execute `scripts/claude_delegate.py` directly, including for `--help` smoke checks. On Windows, direct `.py` execution can exit without useful stdout depending on file association behavior.
 `scripts/claude_bridge.py` is an internal transport and diagnostic tool for isolating Claude CLI launch, stdin transport, or JSON response parsing. Do not call it for ordinary delegation.
-The delegate wrapper waits up to 360 seconds for Claude CLI by default. Add `--timeout-seconds <seconds>` when the user explicitly asks to wait longer or the handoff is review-heavy enough to justify it.
+The delegate wrapper requires an explicit subcommand. The old no-subcommand invocation is removed; use `run` for a synchronous one-shot delegation, or `start/status/wait/stop/resume` for async jobs.
+
+Async job semantics:
+
+- `start` returns a local `job_id` and persists prompt, handoff, stdout, stderr, and job metadata.
+- `status` reads local job state only; it does not contact Claude.
+- `wait --timeout <seconds>` only stops waiting and reports `timed_out`; it never kills the job.
+- `stop` is the only user-facing command that terminates a running job.
+- `resume --SESSION_ID <id>` starts an async resume job and refuses when the same session already has a running job.
+
+Use `run --timeout-seconds <seconds>` only for synchronous one-shot delegations. Async jobs use `wait --timeout` so the main Codex thread controls polling and waiting.
 
 ```bash
 python scripts/claude_delegate.py --help
 ```
 
 ```bash
-python scripts/claude_delegate.py \
+python scripts/claude_delegate.py run \
   --cd "/project" \
   --context-summary "Short high-confidence summary." \
   --context-file-ref "src/app.ts :: entry point" \
@@ -109,7 +119,7 @@ python scripts/claude_delegate.py \
 If the handoff is complex, expensive, or likely to be reused, preview or save it first:
 
 ```bash
-python scripts/claude_delegate.py \
+python scripts/claude_delegate.py run \
   --cd "/project" \
   --context-summary "..." \
   --context-file-ref "src/app.ts :: entry point" \
@@ -120,7 +130,7 @@ python scripts/claude_delegate.py \
 Or save it without sending:
 
 ```bash
-python scripts/claude_delegate.py \
+python scripts/claude_delegate.py run \
   --cd "/project" \
   --context-summary "..." \
   --preview-handoff \
@@ -133,13 +143,14 @@ python scripts/claude_delegate.py \
 - On the first call, send the structured handoff.
 - On `SESSION_ID` resume, do not resend the handoff unless the context materially changed or `--context-on-resume` is needed.
 - If new important findings appear, generate a refreshed compact handoff instead of appending a long free-form update.
+- Use async `status` and `wait` for normal progress checks. Do not repeatedly `resume` the same session to poll progress.
 
 ## Examples
 
 ### Code Review Delegation
 
 ```bash
-python scripts/claude_delegate.py \
+python scripts/claude_delegate.py run \
   --cd "/project" \
   --context-summary "Recent changes affect cancellation flow in gallery polling." \
   --context-file-ref "frontend/src/pages/Gallery/index.tsx :: gallery page polling integration" \
@@ -153,7 +164,7 @@ python scripts/claude_delegate.py \
 ### Implementation Delegation
 
 ```bash
-python scripts/claude_delegate.py \
+python scripts/claude_delegate.py start \
   --cd "/project" \
   --context-summary "Model options mismatch is frontend-driven and already localized." \
   --context-file-ref "frontend/src/pages/Practice/index.tsx :: model option selection UI" \

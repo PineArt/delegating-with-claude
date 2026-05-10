@@ -11,12 +11,22 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 DELEGATE_PATH = ROOT / "scripts" / "claude_delegate.py"
+JOBS_PATH = ROOT / "scripts" / "claude_jobs.py"
 
 
 def load_delegate():
     spec = importlib.util.spec_from_file_location("claude_delegate_under_test", DELEGATE_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_jobs():
+    spec = importlib.util.spec_from_file_location("claude_jobs_under_test", JOBS_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -155,6 +165,7 @@ def test_preview_handoff_saves_and_prints_utf8(monkeypatch, capsys):
             monkeypatch,
             capsys,
             [
+                "run",
                 "--cd",
                 str(tmp_dir),
                 "--context-summary",
@@ -185,6 +196,7 @@ def test_first_call_uses_handoff_and_marks_result(monkeypatch, capsys):
             monkeypatch,
             capsys,
             [
+                "run",
                 "--cd",
                 str(tmp_dir),
                 "--context-summary",
@@ -213,6 +225,7 @@ def test_timeout_seconds_is_forwarded_to_bridge(monkeypatch, capsys):
             monkeypatch,
             capsys,
             [
+                "run",
                 "--cd",
                 str(tmp_dir),
                 "--timeout-seconds",
@@ -240,6 +253,7 @@ def test_resume_without_context_on_resume_sends_raw_prompt(monkeypatch, capsys):
             monkeypatch,
             capsys,
             [
+                "run",
                 "--cd",
                 str(tmp_dir),
                 "--SESSION_ID",
@@ -255,5 +269,484 @@ def test_resume_without_context_on_resume_sends_raw_prompt(monkeypatch, capsys):
         assert parsed["success"] is True
         assert parsed["handoff_used"] is False
         assert sent_prompt(calls[0]) == "Reply with exactly OK."
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_no_subcommand_is_rejected_with_migration_hint(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "claude_delegate.py",
+                "--cd",
+                str(tmp_dir),
+                "--PROMPT",
+                "Reply with exactly OK.",
+            ],
+        )
+
+        try:
+            delegate.main()
+        except SystemExit as error:
+            assert error.code == 2
+        else:
+            raise AssertionError("Expected no-subcommand usage to fail")
+
+        captured = capsys.readouterr()
+        assert "Migration: old no-subcommand usage was removed" in captured.err
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_top_level_help_still_works(monkeypatch, capsys):
+    delegate = load_delegate()
+    monkeypatch.setattr(sys, "argv", ["claude_delegate.py", "--help"])
+
+    try:
+        delegate.main()
+    except SystemExit as error:
+        assert error.code == 0
+    else:
+        raise AssertionError("Expected argparse help to exit")
+
+    captured = capsys.readouterr()
+    assert "start" in captured.out
+    assert "status" in captured.out
+    assert "Migration: old no-subcommand usage was removed" in captured.out
+
+
+def test_timeout_seconds_only_belongs_to_run_subcommand(monkeypatch, capsys):
+    delegate = load_delegate()
+    monkeypatch.setattr(sys, "argv", ["claude_delegate.py", "run", "--help"])
+
+    try:
+        delegate.main()
+    except SystemExit as error:
+        assert error.code == 0
+    else:
+        raise AssertionError("Expected run help to exit")
+
+    run_help = capsys.readouterr().out
+    assert "--timeout-seconds" in run_help
+
+    for subcommand in ("start", "resume"):
+        monkeypatch.setattr(sys, "argv", ["claude_delegate.py", subcommand, "--help"])
+        try:
+            delegate.main()
+        except SystemExit as error:
+            assert error.code == 0
+        else:
+            raise AssertionError(f"Expected {subcommand} help to exit")
+        help_text = capsys.readouterr().out
+        assert "--timeout-seconds" not in help_text
+
+
+def test_start_rejects_timeout_seconds(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "claude_delegate.py",
+                "start",
+                "--cd",
+                str(tmp_dir),
+                "--timeout-seconds",
+                "900",
+                "--PROMPT",
+                "Reply with exactly OK.",
+            ],
+        )
+
+        try:
+            delegate.main()
+        except SystemExit as error:
+            assert error.code == 2
+        else:
+            raise AssertionError("Expected start --timeout-seconds to fail")
+
+        assert "unrecognized arguments: --timeout-seconds 900" in capsys.readouterr().err
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_resume_rejects_timeout_seconds(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "claude_delegate.py",
+                "resume",
+                "--cd",
+                str(tmp_dir),
+                "--SESSION_ID",
+                "session-1",
+                "--timeout-seconds",
+                "900",
+                "--PROMPT",
+                "Reply with exactly OK.",
+            ],
+        )
+
+        try:
+            delegate.main()
+        except SystemExit as error:
+            assert error.code == 2
+        else:
+            raise AssertionError("Expected resume --timeout-seconds to fail")
+
+        assert "unrecognized arguments: --timeout-seconds 900" in capsys.readouterr().err
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_start_writes_record_and_returns_metadata_without_real_claude(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        spawned = []
+
+        def fake_spawn_worker(store, job_id, worker_log_path):
+            spawned.append({"store": store, "job_id": job_id, "worker_log_path": worker_log_path})
+            return 4321
+
+        monkeypatch.setattr(delegate, "start_job", delegate.start_job)
+        monkeypatch.setattr("claude_jobs._spawn_worker", fake_spawn_worker)
+
+        output = run_delegate(
+            delegate,
+            monkeypatch,
+            capsys,
+            [
+                "start",
+                "--cd",
+                str(tmp_dir),
+                "--job-store",
+                str(job_store),
+                "--context-summary",
+                "async start test",
+                "--model",
+                "opus",
+                "--PROMPT",
+                "Reply with exactly OK.",
+            ],
+        )
+
+        parsed = json.loads(output)
+        job_id = parsed["job_id"]
+        assert parsed["success"] is True
+        assert parsed["state"] == "starting"
+        assert spawned == [{"store": job_store.resolve(), "job_id": job_id, "worker_log_path": Path(parsed["paths"]["worker_log"])}]
+
+        record_path = Path(parsed["paths"]["record"])
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        assert record["job_id"] == job_id
+        assert record["worker_pid"] == 4321
+        assert record["options"]["model"] == "opus"
+        assert "timeout_seconds" not in record["options"]
+        assert Path(record["paths"]["prompt"]).read_text(encoding="utf-8").startswith("Please complete this task directly:")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_start_stores_resolved_cd_for_background_worker(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        monkeypatch.chdir(tmp_dir)
+        monkeypatch.setattr("claude_jobs._spawn_worker", lambda store, job_id, worker_log_path: 4321)
+
+        output = run_delegate(
+            delegate,
+            monkeypatch,
+            capsys,
+            [
+                "start",
+                "--cd",
+                ".",
+                "--job-store",
+                str(job_store),
+                "--PROMPT",
+                "Reply with exactly OK.",
+            ],
+        )
+
+        parsed = json.loads(output)
+        record = json.loads(Path(parsed["paths"]["record"]).read_text(encoding="utf-8"))
+        assert record["cd"] == str(tmp_dir.resolve())
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_wait_timeout_returns_without_killing(monkeypatch):
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-running"
+        jobs.write_record(
+            job_store,
+            job_id,
+            {
+                "job_id": job_id,
+                "state": "running",
+                "paths": {"record": str(job_store / job_id / "record.json")},
+            },
+        )
+        killed = []
+        monkeypatch.setattr(jobs, "_terminate_pid", lambda pid: killed.append(pid))
+
+        result = jobs.wait_job(job_store, job_id, timeout_seconds=0.01, poll_interval=0.01)
+
+        assert result["timed_out"] is True
+        assert result["state"] == "running"
+        assert killed == []
+        assert jobs.read_record(job_store, job_id)["state"] == "running"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_stop_is_explicit_kill_path(monkeypatch):
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-running"
+        jobs.write_record(
+            job_store,
+            job_id,
+            {
+                "job_id": job_id,
+                "state": "running",
+                "child_pid": 12345,
+                "worker_pid": 67890,
+                "paths": {"record": str(job_store / job_id / "record.json")},
+            },
+        )
+        killed = []
+        monkeypatch.setattr(jobs, "_terminate_pid", lambda pid: killed.append(pid))
+
+        result = jobs.stop_job(job_store, job_id)
+
+        assert killed == [12345]
+        assert result["state"] == "stopped"
+        assert result["success"] is False
+        assert result["stop_requested"] is True
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_status_reads_local_records_only(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-local"
+        record_dir = job_store / job_id
+        record_dir.mkdir(parents=True)
+        (record_dir / "record.json").write_text(
+            json.dumps({"job_id": job_id, "state": "running", "created_at": "2026-05-10T00:00:00Z"}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(delegate, "call_bridge", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bridge called")))
+
+        output = run_delegate(
+            delegate,
+            monkeypatch,
+            capsys,
+            [
+                "status",
+                "--job-store",
+                str(job_store),
+                "--job-id",
+                job_id,
+            ],
+        )
+
+        parsed = json.loads(output)
+        assert parsed["job_id"] == job_id
+        assert parsed["state"] == "running"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_status_does_not_refresh_or_mutate_stale_records(monkeypatch):
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-stale"
+        jobs.write_record(
+            job_store,
+            job_id,
+            {
+                "job_id": job_id,
+                "state": "running",
+                "worker_pid": 999999,
+                "paths": {"record": str(job_store / job_id / "record.json")},
+            },
+        )
+        monkeypatch.setattr(jobs, "_pid_alive", lambda pid: False)
+
+        status = jobs.local_status(job_store, job_id)
+        record = jobs.read_record(job_store, job_id, refresh_stale=False)
+
+        assert status["state"] == "running"
+        assert "stale_detected" not in status
+        assert record["state"] == "running"
+        assert "stale_detected" not in record
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_resume_refuses_same_session_running_job():
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        jobs.write_record(
+            job_store,
+            "job-1",
+            {
+                "job_id": "job-1",
+                "state": "running",
+                "requested_SESSION_ID": "session-1",
+            },
+        )
+
+        try:
+            jobs.ensure_session_available(job_store, "session-1")
+        except RuntimeError as error:
+            assert "already has a running delegate job" in str(error)
+        else:
+            raise AssertionError("Expected same-session running job to be rejected")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_session_lock_acquisition_is_atomic():
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        first_lock = jobs.acquire_session_lock(job_store, "session-1", "job-1")
+        assert first_lock is not None
+        assert first_lock.is_file()
+
+        try:
+            jobs.acquire_session_lock(job_store, "session-1", "job-2")
+        except RuntimeError as error:
+            assert "already has a running delegate job: job-1" in str(error)
+        else:
+            raise AssertionError("Expected second same-session lock acquisition to fail")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_terminal_session_lock_can_be_reclaimed():
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        jobs.acquire_session_lock(job_store, "session-1", "job-1")
+        jobs.write_record(
+            job_store,
+            "job-1",
+            {
+                "job_id": "job-1",
+                "state": "succeeded",
+                "requested_SESSION_ID": "session-1",
+            },
+        )
+
+        lock = jobs.acquire_session_lock(job_store, "session-1", "job-2")
+        payload = json.loads(lock.read_text(encoding="utf-8"))
+
+        assert payload["job_id"] == "job-2"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_resume_allows_stale_same_session_job(monkeypatch):
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        jobs.write_record(
+            job_store,
+            "job-1",
+            {
+                "job_id": "job-1",
+                "state": "running",
+                "worker_pid": 999999,
+                "requested_SESSION_ID": "session-1",
+                "paths": {"record": str(job_store / "job-1" / "record.json")},
+            },
+        )
+        monkeypatch.setattr(jobs, "_pid_alive", lambda pid: False)
+
+        jobs.ensure_session_available(job_store, "session-1")
+        refreshed = jobs.read_record(job_store, "job-1", refresh_stale=False)
+
+        assert refreshed["state"] == "failed"
+        assert refreshed["stale_detected"] is True
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_worker_launch_failure_releases_session_lock(monkeypatch):
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-launch-failure"
+        session_id = "session-1"
+        paths = {
+            "record": str(job_store / job_id / "record.json"),
+            "prompt": str(job_store / job_id / "prompt.txt"),
+            "handoff": str(job_store / job_id / "handoff.txt"),
+            "stdout": str(job_store / job_id / "stdout.txt"),
+            "stderr": str(job_store / job_id / "stderr.txt"),
+        }
+        jobs.acquire_session_lock(job_store, session_id, job_id)
+        Path(paths["prompt"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(paths["prompt"]).write_text("prompt", encoding="utf-8")
+        jobs.write_record(
+            job_store,
+            job_id,
+            {
+                "job_id": job_id,
+                "state": "starting",
+                "cd": str(tmp_dir),
+                "requested_SESSION_ID": session_id,
+                "SESSION_ID": "",
+                "paths": paths,
+                "options": {
+                    "permission_mode": "bypassPermissions",
+                    "add_dir": [],
+                    "model": "",
+                    "return_raw_result": False,
+                },
+            },
+        )
+        monkeypatch.setattr(jobs, "_build_command", lambda args: ["missing-claude"])
+        monkeypatch.setattr(jobs, "_resolve_executable", lambda name, env: (_ for _ in ()).throw(FileNotFoundError(name)))
+
+        jobs.run_worker(job_store, job_id)
+
+        record = jobs.read_record(job_store, job_id, refresh_stale=False)
+        assert record["state"] == "failed"
+        assert not jobs.session_lock_path(job_store, session_id).exists()
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

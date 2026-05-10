@@ -17,6 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from claude_bridge import DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS, positive_int, run_claude
+from claude_jobs import local_status, stable_job_store, start_job, stop_job, wait_job
 
 
 def _normalize_items(values: Iterable[str]) -> List[str]:
@@ -148,12 +149,15 @@ def call_bridge(args: argparse.Namespace, prompt_to_send: str) -> dict:
     return run_claude(bridge_args)
 
 
-def main() -> None:
-    _configure_stdio()
-    parser = argparse.ArgumentParser(description="Primary structured Claude delegation entrypoint")
+def _add_delegate_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    include_timeout: bool,
+    require_session_id: bool = False,
+) -> None:
     parser.add_argument("--PROMPT", required=True, help="Task instruction for Claude.")
     parser.add_argument("--cd", required=True, help="Workspace root for Claude.")
-    parser.add_argument("--SESSION_ID", default="", help="Resume the specified Claude session.")
+    parser.add_argument("--SESSION_ID", required=require_session_id, default="", help="Resume the specified Claude session.")
     parser.add_argument("--context-summary", default="", help="Short high-confidence summary.")
     parser.add_argument("--context-file-ref", action="append", default=[], help="Relevant file reference, e.g. `src/app.ts :: entry point`.")
     parser.add_argument("--context-finding", action="append", default=[], help="Concrete finding already established.")
@@ -174,14 +178,24 @@ def main() -> None:
     parser.add_argument("--add-dir", action="append", default=[], help="Additional directories to allow tool access to.")
     parser.add_argument("--model", default="", help="Claude model override. Only set this when explicitly requested by the user.")
     parser.add_argument("--return-raw-result", action="store_true", help="Include Claude's raw JSON payload in the output.")
-    parser.add_argument(
-        "--timeout-seconds",
-        type=positive_int,
-        default=DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS,
-        help=f"Maximum seconds to wait for Claude CLI. Defaults to {DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS}.",
-    )
-    args = parser.parse_args()
+    if include_timeout:
+        parser.add_argument(
+            "--timeout-seconds",
+            type=positive_int,
+            default=DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS,
+            help=f"Maximum seconds to wait for Claude CLI. Defaults to {DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS}.",
+        )
 
+
+def _add_job_store_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--job-store",
+        default="",
+        help="Local async job store directory. Defaults to .claude-delegate-jobs in this skill repo.",
+    )
+
+
+def _prepare_prompt(args: argparse.Namespace) -> tuple[str, str, bool]:
     handoff = build_handoff(args)
 
     if args.save_handoff:
@@ -191,22 +205,144 @@ def main() -> None:
 
     if args.preview_handoff:
         sys.stdout.write(handoff)
-        return
+        return handoff, "", False
 
     prompt_to_send = args.PROMPT.strip()
+    handoff_used = False
     if not args.SESSION_ID or args.context_on_resume:
         prompt_to_send = handoff.rstrip()
+        handoff_used = True
+    return handoff, prompt_to_send, handoff_used
+
+
+def _print_json(payload: dict) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _cmd_run(args: argparse.Namespace) -> None:
+    handoff, prompt_to_send, handoff_used = _prepare_prompt(args)
+    if args.preview_handoff:
+        return
 
     result = call_bridge(args, prompt_to_send)
 
     if args.save_handoff:
         result["handoff_path"] = str(Path(args.save_handoff))
-    if not args.SESSION_ID or args.context_on_resume:
-        result["handoff_used"] = True
-    else:
-        result["handoff_used"] = False
+    result["handoff_used"] = handoff_used
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _print_json(result)
+
+
+def _cmd_start(args: argparse.Namespace) -> None:
+    handoff, prompt_to_send, handoff_used = _prepare_prompt(args)
+    if args.preview_handoff:
+        return
+    args.handoff_used = handoff_used
+    record = start_job(args, prompt_to_send, handoff)
+    _print_json(
+        {
+            "success": True,
+            "job_id": record["job_id"],
+            "state": record["state"],
+            "paths": record["paths"],
+            "SESSION_ID": record.get("SESSION_ID", ""),
+            "requested_SESSION_ID": record.get("requested_SESSION_ID", ""),
+        }
+    )
+
+
+def _cmd_resume(args: argparse.Namespace) -> None:
+    handoff, prompt_to_send, handoff_used = _prepare_prompt(args)
+    if args.preview_handoff:
+        return
+    args.handoff_used = handoff_used
+    record = start_job(args, prompt_to_send, handoff, require_session_lock=True)
+    _print_json(
+        {
+            "success": True,
+            "job_id": record["job_id"],
+            "state": record["state"],
+            "paths": record["paths"],
+            "requested_SESSION_ID": record.get("requested_SESSION_ID", ""),
+        }
+    )
+
+
+def _cmd_status(args: argparse.Namespace) -> None:
+    _print_json(local_status(stable_job_store(args.job_store), args.job_id))
+
+
+def _cmd_wait(args: argparse.Namespace) -> None:
+    timeout = None if args.timeout is None else float(args.timeout)
+    _print_json(wait_job(stable_job_store(args.job_store), args.job_id, timeout, args.poll_interval))
+
+
+def _cmd_stop(args: argparse.Namespace) -> None:
+    _print_json(stop_job(stable_job_store(args.job_store), args.job_id))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Primary structured Claude delegation entrypoint",
+        epilog=(
+            "Migration: old no-subcommand usage was removed. Use `run` for a synchronous "
+            "delegation, or `start/status/wait/stop/resume` for async jobs."
+        ),
+    )
+    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+
+    run_parser = subparsers.add_parser("run", help="Run a delegation synchronously.")
+    _add_delegate_arguments(run_parser, include_timeout=True)
+    run_parser.set_defaults(func=_cmd_run)
+
+    start_parser = subparsers.add_parser("start", help="Start an async delegation job and return immediately.")
+    _add_delegate_arguments(start_parser, include_timeout=False)
+    _add_job_store_argument(start_parser)
+    start_parser.set_defaults(func=_cmd_start)
+
+    resume_parser = subparsers.add_parser("resume", help="Start an async resume job for an existing Claude SESSION_ID.")
+    _add_delegate_arguments(resume_parser, include_timeout=False, require_session_id=True)
+    _add_job_store_argument(resume_parser)
+    resume_parser.set_defaults(func=_cmd_resume)
+
+    status_parser = subparsers.add_parser("status", help="Read local async job state without contacting Claude.")
+    _add_job_store_argument(status_parser)
+    status_parser.add_argument("--job-id", default="", help="Job id to inspect. Omit to list all local jobs.")
+    status_parser.set_defaults(func=_cmd_status)
+
+    wait_parser = subparsers.add_parser("wait", help="Wait for a local async job to finish. Timeout does not stop the job.")
+    _add_job_store_argument(wait_parser)
+    wait_parser.add_argument("--job-id", required=True, help="Job id to wait for.")
+    wait_parser.add_argument("--timeout", type=float, default=None, help="Seconds to wait before returning timed_out.")
+    wait_parser.add_argument("--poll-interval", type=float, default=0.25, help="Seconds between local status polls.")
+    wait_parser.set_defaults(func=_cmd_wait)
+
+    stop_parser = subparsers.add_parser("stop", help="Explicitly stop a running async job.")
+    _add_job_store_argument(stop_parser)
+    stop_parser.add_argument("--job-id", required=True, help="Job id to stop.")
+    stop_parser.set_defaults(func=_cmd_stop)
+
+    return parser
+
+
+def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
+    parser = build_parser()
+    raw_args = list(argv) if argv is not None else sys.argv[1:]
+    if raw_args and raw_args[0].startswith("-") and raw_args[0] not in {"-h", "--help"}:
+        parser.error(
+            "Migration: old no-subcommand usage was removed. Use `run` for synchronous delegation "
+            "or `start/status/wait/stop/resume` for async jobs."
+        )
+    args = parser.parse_args(raw_args)
+    if not getattr(args, "subcommand", ""):
+        parser.error("missing subcommand. Use run, start, status, wait, stop, or resume.")
+    return args
+
+
+def main() -> None:
+    _configure_stdio()
+    args = parse_args()
+    args.func(args)
 
 
 if __name__ == "__main__":
