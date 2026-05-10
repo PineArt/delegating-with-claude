@@ -42,3 +42,4 @@ Next Iteration Notes:
 - Follow-up review: Opus returned Pass with no blockers; residual advisory is that exactly-once notification is best-effort rather than lock-proven under concurrent terminal paths.
 - Follow-up 2026-05-11: high-level `run` was removed; `python scripts/claude_delegate.py` is async-only, while `python scripts/claude_bridge.py` remains the low-level synchronous diagnostic path.
 - Follow-up validation after removing high-level `run`: `pytest -q tests\test_claude_delegate.py tests\test_claude_bridge.py` passed with `35 passed in 1.68s`; py_compile, diff check, and harness validator also passed.
+- Follow-up commit/push evidence after removing high-level `run`: commit `2ee4687f1b7f54152606293a1939e87c5f3eadc5` (`Remove synchronous delegate run command`) pushed to `origin/codex/async-delegate-jobs`.
