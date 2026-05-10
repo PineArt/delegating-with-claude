@@ -94,8 +94,11 @@ Async job semantics:
 - `wait --timeout <seconds>` only stops waiting and reports `timed_out`; it never kills the job.
 - `stop` is the only user-facing command that terminates a running job.
 - `resume --SESSION_ID <id>` starts an async resume job and refuses when the same session already has a running job.
+- `start/resume --notify-file <path>` writes a terminal-state JSON payload when the job finishes.
+- `start/resume --notify-command <json-argv>` runs a completion hook after the job finishes; the same JSON payload is sent on stdin.
 
 Use `run --timeout-seconds <seconds>` only for synchronous one-shot delegations. Async jobs use `wait --timeout` so the main Codex thread controls polling and waiting.
+Use `--model <model>` and `--effort <low|medium|high|xhigh|max>` only when the user explicitly asks for those overrides.
 
 ```bash
 python scripts/claude_delegate.py --help
@@ -174,6 +177,14 @@ python scripts/claude_delegate.py start \
   --context-next-step "Update the practice page options to match gallery behavior and verify UI state handling." \
   --PROMPT "Implement the minimal patch and summarize the result."
 ```
+
+## Async Completion Notification
+
+Async jobs do not automatically wake the current Codex chat. Use `--notify-file` when the main thread should watch or poll for completion, and use `--notify-command` when an external notifier should run after terminal state.
+
+Prefer `--notify-command` as a JSON argv array, for example `["python","scripts/on_done.py"]`. The hook runs with `shell=False` and receives the terminal-state payload on stdin. The payload includes `job_id`, `state`, `success`, `SESSION_ID`, `agent_messages`, `error`, `paths`, and `options`.
+
+On Windows, include the executable extension or pass an absolute path for `.cmd` / `.bat` hook scripts.
 
 ## Relationship To Other Skill
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -68,6 +69,79 @@ def write_record(job_store: Path, job_id: str, record: Dict[str, Any]) -> None:
     record = dict(record)
     record["updated_at"] = utc_now()
     _atomic_write_text(record_path(job_store, job_id), json.dumps(record, ensure_ascii=False, indent=2))
+
+
+def _notification_payload(record: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "job_id": record.get("job_id", ""),
+        "state": record.get("state", ""),
+        "success": bool(record.get("success", False)),
+        "SESSION_ID": record.get("SESSION_ID", ""),
+        "requested_SESSION_ID": record.get("requested_SESSION_ID", ""),
+        "agent_messages": record.get("agent_messages", ""),
+        "error": record.get("error", ""),
+        "paths": record.get("paths", {}),
+        "finished_at": record.get("finished_at") or record.get("stopped_at", ""),
+        "options": record.get("options", {}),
+    }
+
+
+def _parse_notify_command(value: str) -> List[str]:
+    stripped = value.strip()
+    if not stripped:
+        return []
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return shlex.split(stripped, posix=os.name != "nt")
+    if not isinstance(parsed, list) or not parsed or not all(isinstance(item, str) and item for item in parsed):
+        raise ValueError("--notify-command JSON form must be a non-empty string array")
+    return parsed
+
+
+def _emit_completion_notification(job_store: Path, job_id: str, record: Dict[str, Any]) -> None:
+    if record.get("notification_sent_at"):
+        return
+    notify_file = str(record.get("notify_file", ""))
+    notify_command = str(record.get("notify_command", ""))
+    if not notify_file and not notify_command:
+        return
+
+    payload = _notification_payload(record)
+    notification_errors: List[str] = []
+    if notify_file:
+        try:
+            _atomic_write_text(Path(notify_file).expanduser(), json.dumps(payload, ensure_ascii=False, indent=2))
+        except OSError as error:
+            notification_errors.append(f"notify_file failed: {error}")
+
+    if notify_command:
+        try:
+            command = _parse_notify_command(notify_command)
+            if command:
+                completed = subprocess.run(
+                    command,
+                    input=json.dumps(payload, ensure_ascii=False),
+                    cwd=record.get("cd") or None,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    capture_output=True,
+                    check=False,
+                    timeout=int(record.get("notify_timeout_seconds") or 30),
+                )
+                if completed.returncode != 0:
+                    notification_errors.append(f"notify_command exit {completed.returncode}: {completed.stderr.strip()}")
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            notification_errors.append(f"notify_command failed: {error}")
+
+    updated = read_record(job_store, job_id, refresh_stale=False)
+    updated["notification_sent_at"] = utc_now()
+    if notification_errors:
+        updated["notification_errors"] = notification_errors
+    else:
+        updated.pop("notification_errors", None)
+    write_record(job_store, job_id, updated)
 
 
 def _read_record_file(job_store: Path, job_id: str) -> Dict[str, Any]:
@@ -291,7 +365,9 @@ def _refresh_record_if_stale(job_store: Path, job_id: str, record: Dict[str, Any
     write_record(job_store, job_id, stale_record)
     release_session_lock(job_store, stale_record.get("requested_SESSION_ID", ""), job_id)
     release_session_lock(job_store, stale_record.get("SESSION_ID", ""), job_id)
-    return json.loads(record_path(job_store, job_id).read_text(encoding="utf-8"))
+    final_record = json.loads(record_path(job_store, job_id).read_text(encoding="utf-8"))
+    _emit_completion_notification(job_store, job_id, final_record)
+    return read_record(job_store, job_id, refresh_stale=False)
 
 
 @contextmanager
@@ -334,11 +410,15 @@ def start_job(
             "requested_SESSION_ID": requested_session_id,
             "SESSION_ID": "",
             "handoff_used": bool(getattr(args, "handoff_used", False)),
+            "notify_file": str(Path(args.notify_file).expanduser().resolve()) if getattr(args, "notify_file", "") else "",
+            "notify_command": getattr(args, "notify_command", ""),
+            "notify_timeout_seconds": int(getattr(args, "notify_timeout_seconds", 30) or 30),
             "paths": paths,
             "options": {
                 "permission_mode": args.permission_mode,
                 "add_dir": list(args.add_dir),
                 "model": args.model,
+                "effort": args.effort or "",
                 "return_raw_result": bool(args.return_raw_result),
             },
         }
@@ -403,6 +483,7 @@ def stop_job(job_store: Path, job_id: str) -> Dict[str, Any]:
     final_record = read_record(job_store, job_id)
     release_session_lock(job_store, final_record.get("requested_SESSION_ID", ""), job_id)
     release_session_lock(job_store, final_record.get("SESSION_ID", ""), job_id)
+    _emit_completion_notification(job_store, job_id, final_record)
     return read_record(job_store, job_id)
 
 
@@ -450,6 +531,7 @@ def run_worker(job_store: Path, job_id: str) -> None:
             SESSION_ID=record.get("requested_SESSION_ID", ""),
             add_dir=options["add_dir"],
             model=options["model"],
+            effort=options.get("effort", ""),
             system_prompt="",
             append_system_prompt="",
         )
@@ -493,6 +575,7 @@ def run_worker(job_store: Path, job_id: str) -> None:
         record = read_record(job_store, job_id, refresh_stale=False)
         release_session_lock(job_store, record.get("requested_SESSION_ID", ""), job_id)
         release_session_lock(job_store, record.get("SESSION_ID", ""), job_id)
+        _emit_completion_notification(job_store, job_id, record)
         return
     except OSError as error:
         _worker_update(
@@ -503,6 +586,7 @@ def run_worker(job_store: Path, job_id: str) -> None:
         record = read_record(job_store, job_id, refresh_stale=False)
         release_session_lock(job_store, record.get("requested_SESSION_ID", ""), job_id)
         release_session_lock(job_store, record.get("SESSION_ID", ""), job_id)
+        _emit_completion_notification(job_store, job_id, record)
         return
 
     stdout = stdout_path.read_text(encoding="utf-8", errors="replace")
@@ -550,6 +634,7 @@ def run_worker(job_store: Path, job_id: str) -> None:
     final_record = read_record(job_store, job_id)
     release_session_lock(job_store, final_record.get("requested_SESSION_ID", ""), job_id)
     release_session_lock(job_store, final_record.get("SESSION_ID", ""), job_id)
+    _emit_completion_notification(job_store, job_id, final_record)
 
 
 def _build_worker_parser() -> argparse.ArgumentParser:

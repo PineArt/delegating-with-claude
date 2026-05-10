@@ -47,8 +47,11 @@ Async job semantics:
 - `wait --timeout <seconds>` only stops waiting and reports `timed_out`; it never kills the job.
 - `stop` is the only user-facing command that terminates a running job.
 - `resume --SESSION_ID <id>` starts an async resume job and refuses to run when the same session already has a running job.
+- `start/resume --notify-file <path>` writes a terminal-state JSON payload when the job finishes.
+- `start/resume --notify-command <json-argv>` runs a completion hook after the job finishes; the same JSON payload is sent on stdin.
 
 `run` keeps `--timeout-seconds <seconds>` for short one-shot delegations. Async jobs use `wait --timeout` instead.
+Use `--model <model>` and `--effort <low|medium|high|xhigh|max>` only when the user explicitly asks for those overrides.
 
 ## Why A Separate Skill
 
@@ -81,6 +84,8 @@ python scripts/claude_delegate.py run \
 python scripts/claude_delegate.py start \
   --cd "/project" \
   --context-summary "Short high-confidence summary." \
+  --effort high \
+  --notify-file ".tmp/claude-job-done.json" \
   --context-next-step "Specific next action." \
   --PROMPT "Review the current plan."
 ```
@@ -91,3 +96,11 @@ python scripts/claude_delegate.py wait --job-id "<job_id>" --timeout 60
 python scripts/claude_delegate.py stop --job-id "<job_id>"
 python scripts/claude_delegate.py resume --SESSION_ID "<session_id>" --cd "/project" --PROMPT "Report progress."
 ```
+
+Notification contract:
+
+- `notify-file` is the simplest main-thread signal: watch or poll the file and then call `status` or `wait` for the full record.
+- `notify-command` should be passed as a JSON argv array such as `["python","scripts/on_done.py"]`; it runs with `shell=False`.
+- The hook receives JSON on stdin with `job_id`, `state`, `success`, `SESSION_ID`, `agent_messages`, `error`, `paths`, and `options`.
+- Notification is terminal-state only and idempotent through `notification_sent_at` in the job record.
+- On Windows, include the executable extension or pass an absolute path for `.cmd` / `.bat` hook scripts.

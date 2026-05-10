@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 
 DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS = 6 * 60
+EFFORT_CHOICES = ("low", "medium", "high", "xhigh", "max")
 
 
 def positive_int(value: str) -> int:
@@ -23,6 +24,13 @@ def positive_int(value: str) -> int:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return parsed
+
+
+def effort_value(value: str) -> str:
+    if value not in EFFORT_CHOICES:
+        allowed = ", ".join(EFFORT_CHOICES)
+        raise argparse.ArgumentTypeError(f"must be one of: {allowed}")
+    return value
 
 
 def _configure_stdio() -> None:
@@ -141,6 +149,10 @@ def _build_command(args: argparse.Namespace) -> List[str]:
     if args.model:
         command.extend(["--model", args.model])
 
+    effort = getattr(args, "effort", "") or ""
+    if effort:
+        command.extend(["--effort", effort])
+
     if args.system_prompt:
         command.extend(["--system-prompt", args.system_prompt])
 
@@ -171,6 +183,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model",
         default="",
         help="Claude model override. Only set this when explicitly requested by the user.",
+    )
+    parser.add_argument(
+        "--effort",
+        default=None,
+        type=effort_value,
+        metavar="EFFORT",
+        help="Claude effort override. Choices: low, medium, high, xhigh, max.",
     )
     parser.add_argument(
         "--system-prompt",

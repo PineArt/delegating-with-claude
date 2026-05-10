@@ -34,6 +34,7 @@ def test_build_command_includes_optional_arguments():
         SESSION_ID="session-1",
         add_dir=["C:/extra/one", "C:/extra/two"],
         model="opus",
+        effort="xhigh",
         system_prompt="system text",
         append_system_prompt="append text",
         PROMPT="Do the work.",
@@ -54,6 +55,8 @@ def test_build_command_includes_optional_arguments():
         "C:/extra/two",
         "--model",
         "opus",
+        "--effort",
+        "xhigh",
         "--system-prompt",
         "system text",
         "--append-system-prompt",
@@ -176,6 +179,7 @@ def test_run_claude_can_be_called_twice_without_prompt_state_leak(monkeypatch):
         "permission_mode": "bypassPermissions",
         "add_dir": [],
         "model": "",
+        "effort": "",
         "system_prompt": "",
         "append_system_prompt": "",
         "return_raw_result": False,
@@ -217,6 +221,7 @@ def test_run_claude_sends_multiline_prompt_via_stdin(monkeypatch):
             permission_mode="bypassPermissions",
             add_dir=[],
             model="",
+            effort="high",
             system_prompt="",
             append_system_prompt="",
             return_raw_result=False,
@@ -226,6 +231,8 @@ def test_run_claude_sends_multiline_prompt_via_stdin(monkeypatch):
 
     assert result["success"] is True
     assert captured["input"] == multiline_prompt
+    assert "--effort" in captured["command"]
+    assert "high" in captured["command"]
     assert multiline_prompt not in captured["command"]
     assert captured["timeout"] == 900
 
@@ -248,6 +255,7 @@ def test_run_claude_reports_default_timeout_after_six_minutes(monkeypatch):
             permission_mode="bypassPermissions",
             add_dir=[],
             model="",
+            effort="",
             system_prompt="",
             append_system_prompt="",
             return_raw_result=False,
@@ -278,6 +286,7 @@ def test_run_claude_reports_configured_timeout(monkeypatch):
             permission_mode="bypassPermissions",
             add_dir=[],
             model="",
+            effort="",
             system_prompt="",
             append_system_prompt="",
             return_raw_result=False,

@@ -9,3 +9,4 @@
 - 2026-05-10: Quality Gate returned Pass after the atomic session-lock rework and confirmed the explicit no-subcommand-removal CLI contract can proceed.
 - 2026-05-10: Final hardening added resolved background `cd` persistence and startup-failure lock release; two regression tests increased focused coverage to 33 tests.
 - 2026-05-10: Final Quality Gate re-gate returned Pass with no blockers; S8 publish can proceed after final validation, commit, and push evidence.
+- 2026-05-10: Follow-up added `--effort` passthrough plus async completion notifications through `--notify-file` and `--notify-command`; Opus review returned Pass with no blockers.

@@ -37,3 +37,6 @@ Residual Risks:
 Next Iteration Notes:
 - Consider an explicit `cleanup` command only after real usage shows the job store needs lifecycle management.
 - Consider a real long-running Opus smoke after this branch lands, using `start/status/wait` rather than sync `run`.
+- Follow-up 2026-05-10: `--effort` now passes through to Claude CLI, and async terminal notifications can write `--notify-file` or run a `--notify-command` hook with JSON on stdin.
+- Follow-up validation: `pytest -q tests\test_claude_delegate.py tests\test_claude_bridge.py` passed with `35 passed in 1.36s`; py_compile, diff check, and harness validator also passed.
+- Follow-up review: Opus returned Pass with no blockers; residual advisory is that exactly-once notification is best-effort rather than lock-proven under concurrent terminal paths.

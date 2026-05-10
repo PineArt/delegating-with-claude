@@ -437,6 +437,12 @@ def test_start_writes_record_and_returns_metadata_without_real_claude(monkeypatc
                 "async start test",
                 "--model",
                 "opus",
+                "--effort",
+                "xhigh",
+                "--notify-file",
+                str(tmp_dir / "notify.json"),
+                "--notify-command",
+                json.dumps([sys.executable, "-c", "import sys; sys.stdin.read()"]),
                 "--PROMPT",
                 "Reply with exactly OK.",
             ],
@@ -453,6 +459,9 @@ def test_start_writes_record_and_returns_metadata_without_real_claude(monkeypatc
         assert record["job_id"] == job_id
         assert record["worker_pid"] == 4321
         assert record["options"]["model"] == "opus"
+        assert record["options"]["effort"] == "xhigh"
+        assert record["notify_file"] == str((tmp_dir / "notify.json").resolve())
+        assert json.loads(record["notify_command"])[0] == sys.executable
         assert "timeout_seconds" not in record["options"]
         assert Path(record["paths"]["prompt"]).read_text(encoding="utf-8").startswith("Please complete this task directly:")
     finally:
@@ -736,6 +745,7 @@ def test_worker_launch_failure_releases_session_lock(monkeypatch):
                     "permission_mode": "bypassPermissions",
                     "add_dir": [],
                     "model": "",
+                    "effort": "",
                     "return_raw_result": False,
                 },
             },
@@ -748,5 +758,82 @@ def test_worker_launch_failure_releases_session_lock(monkeypatch):
         record = jobs.read_record(job_store, job_id, refresh_stale=False)
         assert record["state"] == "failed"
         assert not jobs.session_lock_path(job_store, session_id).exists()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_completion_notification_writes_file_and_runs_hook(monkeypatch):
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        notify_file = tmp_dir / "notify.json"
+        hook_inputs = []
+        job_id = "job-notify"
+        record = {
+            "job_id": job_id,
+            "state": "succeeded",
+            "success": True,
+            "SESSION_ID": "session-1",
+            "requested_SESSION_ID": "",
+            "agent_messages": "OK",
+            "finished_at": "2026-05-10T00:00:00Z",
+            "notify_file": str(notify_file),
+            "notify_command": json.dumps(["notify-tool"]),
+            "notify_timeout_seconds": 5,
+            "paths": {"record": str(job_store / job_id / "record.json")},
+            "options": {"model": "opus", "effort": "high"},
+        }
+        jobs.write_record(job_store, job_id, record)
+
+        def fake_run(command, **kwargs):
+            hook_inputs.append({"command": command, "payload": json.loads(kwargs["input"]), "timeout": kwargs["timeout"]})
+            return jobs.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(jobs.subprocess, "run", fake_run)
+
+        jobs._emit_completion_notification(job_store, job_id, record)
+        jobs._emit_completion_notification(job_store, job_id, jobs.read_record(job_store, job_id, refresh_stale=False))
+
+        file_payload = json.loads(notify_file.read_text(encoding="utf-8"))
+        refreshed = jobs.read_record(job_store, job_id, refresh_stale=False)
+        assert file_payload["job_id"] == job_id
+        assert file_payload["agent_messages"] == "OK"
+        assert file_payload["options"]["effort"] == "high"
+        assert hook_inputs == [{"command": ["notify-tool"], "payload": file_payload, "timeout": 5}]
+        assert "notification_sent_at" in refreshed
+        assert "notification_errors" not in refreshed
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_completion_notification_records_hook_errors(monkeypatch):
+    jobs = load_jobs()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-notify-failure"
+        record = {
+            "job_id": job_id,
+            "state": "failed",
+            "success": False,
+            "error": "delegate failed",
+            "notify_command": json.dumps(["notify-tool"]),
+            "notify_timeout_seconds": 5,
+            "paths": {"record": str(job_store / job_id / "record.json")},
+            "options": {},
+        }
+        jobs.write_record(job_store, job_id, record)
+
+        def fake_run(command, **kwargs):
+            return jobs.subprocess.CompletedProcess(command, 2, stdout="", stderr="hook failed")
+
+        monkeypatch.setattr(jobs.subprocess, "run", fake_run)
+
+        jobs._emit_completion_notification(job_store, job_id, record)
+
+        refreshed = jobs.read_record(job_store, job_id, refresh_stale=False)
+        assert "notification_sent_at" in refreshed
+        assert refreshed["notification_errors"] == ["notify_command exit 2: hook failed"]
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

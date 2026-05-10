@@ -16,7 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from claude_bridge import DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS, positive_int, run_claude
+from claude_bridge import DEFAULT_CLAUDE_RUN_TIMEOUT_SECONDS, effort_value, positive_int, run_claude
 from claude_jobs import local_status, stable_job_store, start_job, stop_job, wait_job
 
 
@@ -141,6 +141,7 @@ def call_bridge(args: argparse.Namespace, prompt_to_send: str) -> dict:
         permission_mode=args.permission_mode,
         add_dir=args.add_dir,
         model=args.model,
+        effort=args.effort or "",
         system_prompt="",
         append_system_prompt="",
         return_raw_result=args.return_raw_result,
@@ -177,6 +178,7 @@ def _add_delegate_arguments(
     )
     parser.add_argument("--add-dir", action="append", default=[], help="Additional directories to allow tool access to.")
     parser.add_argument("--model", default="", help="Claude model override. Only set this when explicitly requested by the user.")
+    parser.add_argument("--effort", default=None, type=effort_value, metavar="EFFORT", help="Claude effort override. Choices: low, medium, high, xhigh, max.")
     parser.add_argument("--return-raw-result", action="store_true", help="Include Claude's raw JSON payload in the output.")
     if include_timeout:
         parser.add_argument(
@@ -192,6 +194,25 @@ def _add_job_store_argument(parser: argparse.ArgumentParser) -> None:
         "--job-store",
         default="",
         help="Local async job store directory. Defaults to .claude-delegate-jobs in this skill repo.",
+    )
+
+
+def _add_notification_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--notify-file",
+        default="",
+        help="Write a terminal-state JSON notification to this file when the async job finishes.",
+    )
+    parser.add_argument(
+        "--notify-command",
+        default="",
+        help="Run a completion hook after the async job finishes. Prefer a JSON argv array; payload is sent on stdin.",
+    )
+    parser.add_argument(
+        "--notify-timeout-seconds",
+        type=positive_int,
+        default=30,
+        help="Maximum seconds to wait for the notify command. Defaults to 30.",
     )
 
 
@@ -298,11 +319,13 @@ def build_parser() -> argparse.ArgumentParser:
     start_parser = subparsers.add_parser("start", help="Start an async delegation job and return immediately.")
     _add_delegate_arguments(start_parser, include_timeout=False)
     _add_job_store_argument(start_parser)
+    _add_notification_arguments(start_parser)
     start_parser.set_defaults(func=_cmd_start)
 
     resume_parser = subparsers.add_parser("resume", help="Start an async resume job for an existing Claude SESSION_ID.")
     _add_delegate_arguments(resume_parser, include_timeout=False, require_session_id=True)
     _add_job_store_argument(resume_parser)
+    _add_notification_arguments(resume_parser)
     resume_parser.set_defaults(func=_cmd_resume)
 
     status_parser = subparsers.add_parser("status", help="Read local async job state without contacting Claude.")
