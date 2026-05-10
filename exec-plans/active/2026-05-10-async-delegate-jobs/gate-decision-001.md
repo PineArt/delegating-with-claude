@@ -15,4 +15,3 @@ Due Before: S8 publish readiness.
 
 Evidence:
 - Quality Gate owner Volta returned Fail with the atomic lock finding.
-
