@@ -93,6 +93,7 @@ Async job semantics:
 - `status` reads local job state only; it does not contact Claude.
 - `wait --timeout <seconds>` only stops waiting and reports `timed_out`; it never kills the job.
 - `stop` is the only user-facing command that terminates a running job.
+- `status`, `wait`, and `stop` accept either positional job ids (`wait <job_id>`) or `--job-id <job_id>`.
 - `resume --SESSION_ID <id>` starts an async resume job and refuses when the same session already has a running job.
 - `start/resume --notify-file <path>` writes a terminal-state JSON payload when the job finishes.
 - `start/resume --notify-command <json-argv>` runs a completion hook after the job finishes; the same JSON payload is sent on stdin.

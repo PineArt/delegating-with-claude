@@ -262,6 +262,17 @@ def _cmd_stop(args: argparse.Namespace) -> None:
     _print_json(stop_job(stable_job_store(args.job_store), args.job_id))
 
 
+def _resolve_job_id_argument(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    positional = getattr(args, "job_id_positional", "") or ""
+    flagged = getattr(args, "job_id", "") or ""
+    if positional and flagged and positional != flagged:
+        parser.error("job id specified twice with different values; use either positional job_id or --job-id.")
+    resolved = flagged or positional
+    if args.subcommand in {"wait", "stop"} and not resolved:
+        parser.error(f"{args.subcommand} requires a job id; use `{args.subcommand} <job_id>` or `{args.subcommand} --job-id <job_id>`.")
+    args.job_id = resolved
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Primary structured Claude delegation entrypoint",
@@ -286,19 +297,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Read local async job state without contacting Claude.")
     _add_job_store_argument(status_parser)
+    status_parser.add_argument("job_id_positional", nargs="?", help="Job id to inspect. Omit to list all local jobs.")
     status_parser.add_argument("--job-id", default="", help="Job id to inspect. Omit to list all local jobs.")
     status_parser.set_defaults(func=_cmd_status)
 
     wait_parser = subparsers.add_parser("wait", help="Wait for a local async job to finish. Timeout does not stop the job.")
     _add_job_store_argument(wait_parser)
-    wait_parser.add_argument("--job-id", required=True, help="Job id to wait for.")
+    wait_parser.add_argument("job_id_positional", nargs="?", help="Job id to wait for.")
+    wait_parser.add_argument("--job-id", default="", help="Job id to wait for.")
     wait_parser.add_argument("--timeout", type=float, default=None, help="Seconds to wait before returning timed_out.")
     wait_parser.add_argument("--poll-interval", type=float, default=0.25, help="Seconds between local status polls.")
     wait_parser.set_defaults(func=_cmd_wait)
 
     stop_parser = subparsers.add_parser("stop", help="Explicitly stop a running async job.")
     _add_job_store_argument(stop_parser)
-    stop_parser.add_argument("--job-id", required=True, help="Job id to stop.")
+    stop_parser.add_argument("job_id_positional", nargs="?", help="Job id to stop.")
+    stop_parser.add_argument("--job-id", default="", help="Job id to stop.")
     stop_parser.set_defaults(func=_cmd_stop)
 
     return parser
@@ -314,6 +328,8 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     args = parser.parse_args(raw_args)
     if not getattr(args, "subcommand", ""):
         parser.error("missing subcommand. Use start, status, wait, stop, or resume.")
+    if args.subcommand in {"status", "wait", "stop"}:
+        _resolve_job_id_argument(parser, args)
     return args
 
 

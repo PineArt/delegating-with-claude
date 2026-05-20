@@ -549,6 +549,135 @@ def test_status_reads_local_records_only(monkeypatch, capsys):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def test_status_accepts_positional_job_id(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-local"
+        record_dir = job_store / job_id
+        record_dir.mkdir(parents=True)
+        (record_dir / "record.json").write_text(
+            json.dumps({"job_id": job_id, "state": "running", "created_at": "2026-05-10T00:00:00Z"}),
+            encoding="utf-8",
+        )
+
+        output = run_delegate(
+            delegate,
+            monkeypatch,
+            capsys,
+            [
+                "status",
+                "--job-store",
+                str(job_store),
+                job_id,
+            ],
+        )
+
+        parsed = json.loads(output)
+        assert parsed["job_id"] == job_id
+        assert parsed["state"] == "running"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_wait_accepts_positional_job_id(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-done"
+        record_dir = job_store / job_id
+        record_dir.mkdir(parents=True)
+        (record_dir / "record.json").write_text(
+            json.dumps({"job_id": job_id, "state": "succeeded", "success": True}),
+            encoding="utf-8",
+        )
+
+        output = run_delegate(
+            delegate,
+            monkeypatch,
+            capsys,
+            [
+                "wait",
+                "--job-store",
+                str(job_store),
+                job_id,
+                "--timeout",
+                "0.01",
+            ],
+        )
+
+        parsed = json.loads(output)
+        assert parsed["job_id"] == job_id
+        assert parsed["state"] == "succeeded"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_stop_accepts_positional_job_id(monkeypatch, capsys):
+    delegate = load_delegate()
+    tmp_dir = make_temp_dir()
+    try:
+        job_store = tmp_dir / "jobs"
+        job_id = "job-running"
+        record_dir = job_store / job_id
+        record_dir.mkdir(parents=True)
+        (record_dir / "record.json").write_text(
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "state": "running",
+                    "success": False,
+                    "paths": {"record": str(record_dir / "record.json")},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        output = run_delegate(
+            delegate,
+            monkeypatch,
+            capsys,
+            [
+                "stop",
+                "--job-store",
+                str(job_store),
+                job_id,
+            ],
+        )
+
+        parsed = json.loads(output)
+        assert parsed["job_id"] == job_id
+        assert parsed["state"] == "stopped"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_conflicting_positional_and_flagged_job_id_is_rejected(monkeypatch, capsys):
+    delegate = load_delegate()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "claude_delegate.py",
+            "wait",
+            "job-a",
+            "--job-id",
+            "job-b",
+        ],
+    )
+
+    try:
+        delegate.main()
+    except SystemExit as error:
+        assert error.code == 2
+    else:
+        raise AssertionError("Expected conflicting job ids to fail")
+
+    assert "job id specified twice with different values" in capsys.readouterr().err
+
+
 def test_status_does_not_refresh_or_mutate_stale_records(monkeypatch):
     jobs = load_jobs()
     tmp_dir = make_temp_dir()

@@ -49,6 +49,7 @@ Async job semantics:
 - `status` reads local job state only; it does not contact Claude.
 - `wait --timeout <seconds>` only stops waiting and reports `timed_out`; it never kills the job.
 - `stop` is the only user-facing command that terminates a running job.
+- `status`, `wait`, and `stop` accept either positional job ids (`wait <job_id>`) or `--job-id <job_id>`.
 - `resume --SESSION_ID <id>` starts an async resume job and refuses to run when the same session already has a running job.
 - `start/resume --notify-file <path>` writes a terminal-state JSON payload when the job finishes.
 - `start/resume --notify-command <json-argv>` runs a completion hook after the job finishes; the same JSON payload is sent on stdin.
@@ -94,9 +95,9 @@ python scripts/claude_delegate.py start \
 ```
 
 ```bash
-python scripts/claude_delegate.py status --job-id "<job_id>"
-python scripts/claude_delegate.py wait --job-id "<job_id>" --timeout 60
-python scripts/claude_delegate.py stop --job-id "<job_id>"
+python scripts/claude_delegate.py status "<job_id>"
+python scripts/claude_delegate.py wait "<job_id>" --timeout 60
+python scripts/claude_delegate.py stop "<job_id>"
 python scripts/claude_delegate.py resume --SESSION_ID "<session_id>" --cd "/project" --PROMPT "Report progress."
 ```
 
